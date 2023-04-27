@@ -1,0 +1,2053 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(RColorBrewer)
+library(moosefun)
+
+pfile = "parameters/pfile.txt" 
+pardata = read.table(pfile, header = FALSE, sep = "=", as.is = TRUE)
+```
+
+## Read in the PCA Data
+
+```{r}
+## Results Directory
+w = which(pardata[,1] == "RESULTSDIR")
+resultsdir = pardata[w,2]
+
+## smartpca directory
+pcadir = paste0(resultsdir, "smartpca/")
+## PCA directorty files
+pcafiles = list.files(pcadir)
+
+## Identify smartPCA files
+w = grep("eigen", pcafiles)
+pcafiles = pcafiles[w]
+
+## Population IDs
+pops = c("AFR","EUR","SAS","EAS")
+# pops = c("AFR", "SAS","EAS")
+
+## Read in the data
+my_pca_data = lapply(pops, function(pop){
+    ## Read in the eigenvalues and estimate the variance explained
+    f = paste0(pcadir, pop, ".eigenvalues")
+    varexp = read.table( f, header = FALSE, as.is = TRUE )[,1]
+    varexp = varexp/sum(varexp) *100
+    ## Read in the eigenvectors or PCs
+    f = paste0(pcadir, pop, ".eigenvectors")
+    pcs = read.table( f, header = FALSE, as.is = TRUE)
+    colnames(pcs) = c("ID", paste0("PC", 1:100), "pop")
+    pcs$pop = gsub("UKBB_relatives","UKBB", pcs$pop )
+    ###
+    pop_order = sort(unique(pcs$pop))
+    w = which(pop_order == "UKBB")
+    pop_order = pop_order[-w]
+    pop = factor(pcs$pop, levels = c("UKBB", pop_order))
+    pcs$pop = pop
+    ### reorder data frame for UKBB first
+    w = grep("UKBB", pop)
+    pcs = rbind(pcs[w, ], pcs[-w,])
+    ### add color
+    cols = RColorBrewer::brewer.pal( length(unique(pop_order)) , "Set1")
+    cols = c("grey",cols)
+    pcs$pcol = cols[ as.factor( pcs$pop ) ]
+    ## add shapes
+    pcs$ppch =  c(1, rep(20,length(pop_order)) )[pcs$pop]
+    ## add shape sixe
+    pcs$pcex =  c(1, rep(2,length(pop_order)) )[pcs$pop]
+    ## 
+    out = list(pcs = pcs, varexp = varexp)
+    return(out)
+
+})
+names(my_pca_data) = pops
+
+```
+
+## Variance Explained in the PCs
+
+```{r}
+my_varexp = lapply(pops, function(pop){
+    ## Read in the eigenvalues and estimate the variance explained
+    f = paste0(pcadir, pop, ".eigenvalues")
+    varexp = read.table( f, header = FALSE, as.is = TRUE )[,1]
+    varexp = varexp/sum(varexp) *100
+    return(varexp)
+
+})
+names(my_varexp) = pops
+
+```
+
+
+
+## Read in the kmeans Data
+
+```{r}
+## Results Directory
+w = which(pardata[,1] == "RESULTSDIR")
+resultsdir = pardata[w,2]
+
+## kmeans directory
+kdir = paste0(resultsdir, "kmeans/")
+## PCA directorty files
+kfiles = list.files(kdir)
+
+## Identify smartPCA files
+w = grep("_Kcluster.IDS", kfiles)
+kfiles = kfiles[w]
+
+## Population IDs
+pops = c("AFR","EUR","SAS","EAS")
+# pops = c("AFR", "SAS","EAS")
+
+## Read in the data
+my_kmeans_data = lapply(pops, function(pop){
+    ## Read in the eigenvalues and estimate the variance explained
+    f = paste0(kdir, "ukb_1kg_",pop,"_Kcluster.IDS")
+    kclusterIDs = read.table( f, header = FALSE, as.is = TRUE )
+    return(kclusterIDs)
+})
+names(my_kmeans_data) = pops
+
+## load Rdata file of kmeans results
+## that was run on BC3
+f = paste0(kdir,"kmeans.Rdata")
+load(f)
+
+
+```
+
+## read in the self described ethnicity
+
+```{r}
+## Results Directory
+w = which(pardata[,1] == "RESULTSDIR")
+resultsdir = pardata[w,2]
+
+## self described ethnicity directory
+f = paste0(resultsdir, "self_described_ethnicity/pheno_cob_all.txt")
+my_sde_data = read.table(f, header = TRUE, sep = "\t", as.is = TRUE)
+
+```
+
+## Quick qc verification
+
+```{r}
+mytable  = table(my_sde_data$cob, my_sde_data$cob_un_regions)
+mytable["india",]
+```
+
+## How many Continents of Birth are there?
+
+```{r}
+table(my_sde_data$cob_foreign_continent)
+```
+
+## How many Contries of Birth are there?
+
+```{r}
+length( table(my_sde_data$cob) )
+```
+
+## How many self report ethnicities are there?
+
+```{r}
+length( table(my_sde_data$selfreport_ethnic_bg)  )
+table(my_sde_data$selfreport_ethnic_bg) 
+```
+
+## Edit UN Region Names
+
+```{r}
+RegionNames = my_sde_data$cob_un_regions
+## Turn All of the NAs into not_available
+w = which( is.na(RegionNames) )
+if(length(w) >= 0 ){
+  RegionNames[w] = "not_available"
+}
+## Turn "not_studied" into "not_available"
+RegionNames = gsub("not_studied","not_available",RegionNames)
+## Turn "not_studied" into "not_available"
+RegionNames = gsub("south-eastern","SE",RegionNames)
+
+## Capitalize the First Letter
+RegionNames = sapply(RegionNames, function(x){
+  y = substring(x, 1, 1)
+  z = substring(x, 2, nchar(x))
+  out = paste0( toupper(y), z )
+  return(out)
+})
+
+
+## If there is an "_" capitalize the next letter
+RegionNames = sapply(RegionNames, function(x){
+  w = which( strsplit(x, split = "")[[1]] == "_")
+  if(length(w)>0){
+    w = w + 1
+    y = substring(x, w, w)  
+    a = substring(x, 1, w-1 )
+    b = substring(x, w+1, nchar(x) )
+    out = paste0( a, toupper(y), b)
+  } else {
+      out = x
+    }
+  return(out)
+})
+
+## Replace the "_" with a " "
+RegionNames = gsub("_"," ", RegionNames)
+
+RegionNames = gsub("Northen Europe", "Northern Europe", RegionNames)
+
+my_sde_data$cob_un_regions = RegionNames
+```
+
+
+## Edit Country of Birth
+
+```{r}
+COB = my_sde_data$cob
+## Turn All of the NAs into not_available
+w = which( is.na(COB) )
+if(length(w) >= 0 ){
+  COB[w] = "not_available"
+}
+
+## Capitalize the First Letter
+COB = sapply(COB, function(x){
+  y = substring(x, 1, 1)
+  z = substring(x, 2, nchar(x))
+  out = paste0( toupper(y), z )
+  return(out)
+})
+
+
+## If there is an "_" capitalize the next letter
+COB = sapply(COB, function(x){
+  w = which( strsplit(x, split = "")[[1]] == "_")
+  if(length(w)>0){
+    for(pos in w){
+      pos = pos + 1
+      y = substring(x, pos, pos)  
+      a = substring(x, 1, pos-1 )
+      b = substring(x, pos+1, nchar(x) )
+      new = paste0( a, toupper(y), b)
+      x = new
+    }
+    out = x
+  } else{
+    out = x
+  }
+  return(out)
+})
+
+## Replace the "_" with a " "
+COB = gsub("_"," ", COB)
+
+my_sde_data$cob = COB
+```
+
+
+## Prepare CAG Data sets
+
+```{r}
+pops = c("AFR","EUR","SAS","EAS")
+my_cag_data = lapply(pops, function(pop){
+  # pop = names(my_pca_data)[i]
+  # varexp = signif( my_pca_data[[i]]$varexp[1:20] , d = 3)
+  ###############################
+  ## PCA Data
+  ###############################
+  cagdata = my_pca_data[[pop]]$pcs
+  # cagdata = cagdata[, c("PC1","PC2","PC3","PC4", "PC5", "ID", "pop","pcol","ppch" ,"pcex")]
+  cagdata = cagdata[, c("PC1","PC2","PC3","PC4", "PC5", "ID", "pop")]
+  cagdata$SamID = sapply(cagdata$ID, function(z){
+     strsplit(z, split = ":")[[1]][1]
+   })
+  ###############################
+  ## Add Kmeans
+  ## ** from the kmeans run on
+  ## ** BC3
+  ###############################
+  # k = my_kmeans_data[[pop]]
+  # m = match(cagdata$ID, k[,1])
+  # cagdata$k = k[m,3]
+  bestk = kmeans[[pop]]$BestK
+  if(pop == "EUR"){ bestk = 6 }
+  k = kmeans[[pop]]$K[[bestk]]$cluster
+  m = match( rownames(cagdata), names(k) )
+  cagdata$k = k[m]
+  ###############################
+  ## Add Self-reported Ethnicity
+  ###############################
+  m = match(cagdata$SamID, my_sde_data$genid )
+  cagdata$SRE = my_sde_data$selfreport_ethnic_bg[m]
+  cagdata$un_region = my_sde_data$cob_un_regions[m]
+  cagdata$cob = my_sde_data$cob[m]
+  cagdata$home_north = my_sde_data$home_north[m]
+  cagdata$home_east = my_sde_data$home_east[m]
+  ##
+  return(cagdata)
+})
+
+names(my_cag_data) = pops
+  
+
+```
+
+## Uniform UN Regions color scheme for ggplot
+
+```{r}
+### number of individuals in each UN regions per CAG 
+counts = lapply(  my_cag_data , function(x) { table( x$un_region )  }  )
+## vector of regions names
+region_names = unique( unlist( lapply(counts, names) ) )
+#### A Table of Region Counts by CAG
+regions_counts_table = sapply(region_names, function(region){
+  s = sapply(pops, function(pop){
+    ## data for that pop
+    tempdata = counts[[pop]]
+    w = which( names(tempdata)  == region)
+    if(length(w) == 1){
+      out = tempdata[w]
+    } else {
+      out = 0
+    }
+    return(out)
+  })
+})
+
+## A sum of regions particpants
+regions_counts = apply(regions_counts_table , 2, sum)
+
+## order by abundance
+rc = sort(regions_counts, decreasing = TRUE) 
+UNregions = data.frame(counts = rc, names = names(rc))
+
+## Place not available last
+w = which( UNregions$names == "Not Available" )
+UNregions = rbind(UNregions[-w,] , UNregions[w, ])
+
+## Add Colors
+othercolors = c("firebrick4","cadetblue1","chartreuse1","darkblue",
+                "darkgreen","darkmagenta", "black", "grey")
+    # c("firebrick4", "darkblue", "darkgreen","darkmagenta","darkgoldenrod2")
+pcol = c( brewer.pal(8, "Set1"), othercolors  )
+plotcolors = pcol
+# plot(1:15, col = pcol, pch = 19, cex = 3)
+###
+UNregions$colors = pcol
+
+UNregions
+
+```
+
+
+## Add  UN Region plot colors to my_cag_data for base R
+
+- and also sort each CAG data frame by UN Region sample size
+
+```{r}
+pcols = c( brewer.pal(8, "Set1"), c("grey80","grey60","grey40","grey20","black") )
+
+for(pop in pops){
+  ## What are the most common regions?
+  n = names( sort( table( my_cag_data[[pop]]$un_region ) , decreasing = TRUE) )
+  ## set as a factor and define levels
+  my_cag_data[[pop]]$un_region = factor(my_cag_data[[pop]]$un_region, levels = n)
+  ## Define Colors
+  my_cag_data[[pop]]$un_region_pcol = pcols[my_cag_data[[pop]]$un_region]
+  #################################################
+  ## Order the plot data to have the rare 
+  ## UN Regions at the bottom of the data frame
+  #################################################
+  r = names( sort( table( my_cag_data[[pop]]$un_region ), decreasing = TRUE ) )
+  o = unlist( sapply(r, function(x){ which( my_cag_data[[pop]]$un_region %in% x )  }) )
+  my_cag_data[[pop]] = my_cag_data[[pop]][o,]
+  
+}
+```
+
+# Correspondence Analysis
+
+## k by country of birth
+
+```{r}
+cob_CA_tables = lapply(pops, function(pop){
+  mytable = with( my_cag_data[[pop]], table(k, cob) ) 
+  
+  #######################
+  ## FILTER
+  #######################
+  ## remove those countries with less than 10 observations
+  w = which( apply(mytable, 2, sum) < 10 )
+  if(length(w)>0){ mytable = mytable[,-w] }
+  ## remove the "Not Available Country"
+  w = which(colnames(mytable) == "Not Available")
+  if(length(w)>0){ mytable = mytable[,-w] }
+  
+  #######################
+  ## Perform CA
+  #######################
+  fit <- ca::ca( mytable )
+  return(fit)
+})
+names(cob_CA_tables) = pops
+
+
+cob_CA_chisq_P = sapply(pops, function(pop){
+  mytable = with( my_cag_data[[pop]], table(k, cob) ) 
+  
+  #######################
+  ## FILTER
+  #######################
+  ## remove those countries with less than 10 observations
+  w = which( apply(mytable, 2, sum) < 10 )
+  if(length(w)>0){ mytable = mytable[,-w] }
+  ## remove the "Not Available Country"
+  w = which(colnames(mytable) == "Not Available")
+  if(length(w)>0){ mytable = mytable[,-w] }
+  
+  chisq.test(mytable, simulate.p.value = TRUE, B = 10000)$p.value
+
+})
+cob_CA_chisq_P
+```
+
+
+## k by UN geographic region
+
+```{r}
+unregion_CA_tables = lapply(pops, function(pop){
+  mytable = with( my_cag_data[[pop]], table(k, un_region) ) 
+  #######################
+  ## FILTER
+  #######################
+  ## remove those countries with less than 10 observations
+  w = which( apply(mytable, 2, sum) < 10 )
+  if(length(w)>0){ mytable = mytable[,-w] }
+  ## remove the "Not Available Country"
+  w = which(colnames(mytable) == "Not Available")
+  if(length(w)>0){ mytable = mytable[,-w] }
+  
+  #######################
+  ## Perform CA
+  #######################
+  fit <- ca::ca( mytable )
+  return(fit)
+})
+names(unregion_CA_tables) = pops
+
+
+unregion_CA_chisq_P = sapply(pops, function(pop){
+  mytable = with( my_cag_data[[pop]], table(k, un_region) ) 
+  
+  #######################
+  ## FILTER
+  #######################
+  ## remove those countries with less than 10 observations
+  w = which( apply(mytable, 2, sum) < 10 )
+  if(length(w)>0){ mytable = mytable[,-w] }
+  ## remove the "Not Available Country"
+  w = which(colnames(mytable) == "Not Available")
+  if(length(w)>0){ mytable = mytable[,-w] }
+  
+  chisq.test(mytable, simulate.p.value = TRUE, B = 10000)$p.value
+
+})
+unregion_CA_chisq_P
+
+
+```
+
+## K by country of birth plots
+
+```{r}
+cobCAplot = lapply(pops, function(pop){
+  fit = cob_CA_tables[[pop]]
+  ### Variance Explained
+  varexp = round( summary(fit)[[1]][1:2, 3] , d = 2)
+  ###
+  k = fit$rowcoord[, 1:2]
+  r = fit$colcoord[, 1:2]
+  ### Color selection
+  pcol = c( RColorBrewer::brewer.pal(nrow(k), "Set1"), "grey" )
+  ###
+  df = data.frame( id = c( paste0( "K", rownames( k ) ), rownames(r)), 
+                   Dim1 = c(k[,1], r[,1]),
+                   Dim2 = c(k[,2], r[,2])) 
+  df$datatype = as.factor( c(rep("K", nrow(k)), rep("GR", nrow(r))) )
+  df$datatype2 = as.factor( c( df$id[1:nrow(k)] , rep("GR", nrow(r))  )  )
+  df$datatype2 = factor(df$datatype2, levels = c( paste0("K", 1:nrow(k)), "GR")  )
+  
+  # minmax = c( min(df$Dim1)-0.25, max(df$Dim1)+0.25  )
+  # yminmax = c( min(df$Dim2)-0.25, max(df$Dim2)+0.25  )
+  r = range(df$Dim1); r = (r[2]-r[1])*0.075
+  minmax = c( min(df$Dim1)-r, max(df$Dim1)+r  )
+  
+  r = range(df$Dim2); r = (r[2]-r[1])*0.075
+  yminmax = c( min(df$Dim2)-r, max(df$Dim2)+r  )
+  
+  w = which(df$datatype == "GR")
+  
+  plot = df %>% ggplot(aes(x = Dim1, y = Dim2)) +
+    geom_point( aes(col = datatype2, shape = datatype, size = datatype)) + 
+    # geom_text( aes( label = id ), 
+    #           vjust = 1, nudge_y = -0.07, 
+    #           angle = 45, 
+    #           check_overlap = FALSE) +
+    geom_text(data = df[w, ], aes(x = Dim1, y = Dim2, label = id),
+              vjust = 1, nudge_y = -0.07, 
+               angle = 45,
+              check_overlap = TRUE) +
+    geom_text(data = df[-w, ], aes(x = Dim1, y = Dim2, label = id),
+              color = "white") +
+    scale_color_manual(values = pcol ) +
+    scale_shape_manual(values = c(15, 19) ) +
+    scale_size_manual(values = c(3, 8) ) +
+    theme_bw( ) +
+    xlim(minmax) +
+    ylim(yminmax) +
+    labs(x = paste0("Dimension 1 (",varexp[1],"%)"),
+         y = paste0("Dimension 2 (",varexp[2],"%)"), title = pop) +
+    theme(legend.position = "none")
+  
+  return(plot)
+   
+})
+
+ 
+```
+
+
+## K by country of birth plots
+
+```{r}
+UNregioncobCAplot = lapply(pops, function(pop){
+  fit = unregion_CA_tables[[pop]]
+  ### Variance Explained
+  varexp = round( summary(fit)[[1]][1:2, 3] , d = 2)
+  ###
+  k = fit$rowcoord[, 1:2]
+  r = fit$colcoord[, 1:2]
+  ### Color selection
+  pcol = c( RColorBrewer::brewer.pal(nrow(k), "Set1"), "grey" )
+  ###
+  df = data.frame( id = c( paste0( "K", rownames( k ) ), rownames(r)), 
+                   Dim1 = c(k[,1], r[,1]),
+                   Dim2 = c(k[,2], r[,2])) 
+  df$datatype = as.factor( c(rep("K", nrow(k)), rep("GR", nrow(r))) )
+  df$datatype2 = as.factor( c( df$id[1:nrow(k)] , rep("GR", nrow(r))  )  )
+  df$datatype2 = factor(df$datatype2, levels = c( paste0("K", 1:nrow(k)), "GR")  )
+  
+  # minmax = c( min(df$Dim1)-0.25, max(df$Dim1)+0.25  )
+  # yminmax = c( min(df$Dim2)-0.25, max(df$Dim2)+0.25  )
+  r = range(df$Dim1); r = (r[2]-r[1])*0.075
+  minmax = c( min(df$Dim1)-r, max(df$Dim1)+r  )
+  
+  r = range(df$Dim2); r = (r[2]-r[1])*0.075
+  yminmax = c( min(df$Dim2)-r, max(df$Dim2)+r  )
+  
+  w = which(df$datatype == "GR")
+  
+  plot = df %>% ggplot(aes(x = Dim1, y = Dim2)) +
+    geom_point( aes(col = datatype2, shape = datatype, size = datatype)) + 
+    # geom_text( aes( label = id ), 
+    #           vjust = 1, nudge_y = -0.07, 
+    #           angle = 45, 
+    #           check_overlap = FALSE) +
+    geom_text(data = df[w, ], aes(x = Dim1, y = Dim2, label = id),
+              vjust = 1, nudge_y = -0.07, 
+               angle = 45,
+              check_overlap = TRUE) +
+    geom_text(data = df[-w, ], aes(x = Dim1, y = Dim2, label = id),
+              color = "white") +
+    scale_color_manual(values = pcol ) +
+    scale_shape_manual(values = c(15, 19) ) +
+    scale_size_manual(values = c(3, 8) ) +
+    theme_bw( ) +
+    xlim(minmax) +
+    ylim(yminmax) +
+    labs(x = paste0("Dimension 1 (",varexp[1],"%)"),
+         y = paste0("Dimension 2 (",varexp[2],"%)"), title = pop) +
+    theme(legend.position = "none")
+  
+  return(plot)
+   
+})
+
+ 
+```
+
+```{r, fig.width=15, fig.height =10}
+names(cobCAplot) = pops
+p = UNregioncobCAplot
+for(pop in pops){ p[[pop]] = cobCAplot[[pop]] }
+
+f = paste0(resultsdir, "figures/COB_UNregion_CA_Plots_v2.pdf" )
+pdf(f, width = 16, height = 8)
+ggpubr::ggarrange(plotlist = p, nrow = 2, ncol = 4)
+dev.off()
+
+```
+
+## COB CA plots
+
+```{r}
+
+cob_CA_plots = lapply(pops, function(pop){
+  fit = cob_CA_tables[[pop]]
+  ### how many dimensions in the CA
+  l = ncol(fit$rowcoord)
+  if(l > 4){ l = 4 }
+  k = fit$rowcoord[, 1:l]
+  r = fit$colcoord[, 1:l]
+  ### Variance Explained
+  varexp = round( summary(fit)[[1]][1:l, 3] , d = 2)
+  ### Color selection
+  pcol = c( RColorBrewer::brewer.pal(nrow(k), "Set1"), "grey" )
+  ###
+  if(l == 4){
+    df = data.frame( id = c( paste0( "K", rownames( k ) ), rownames(r)), 
+                 Dim1 = c(k[,1], r[,1]),
+                 Dim2 = c(k[,2], r[,2]),
+                 Dim3 = c(k[,3], r[,3]),
+                 Dim4 = c(k[,4], r[,4]) ) 
+  }
+  if(l == 3){
+    df = data.frame( id = c( paste0( "K", rownames( k ) ), rownames(r)), 
+                 Dim1 = c(k[,1], r[,1]),
+                 Dim2 = c(k[,2], r[,2]),
+                 Dim3 = c(k[,3], r[,3]) )
+  }
+  if(l == 2){
+    df = data.frame( id = c( paste0( "K", rownames( k ) ), rownames(r)), 
+                 Dim1 = c(k[,1], r[,1]),
+                 Dim2 = c(k[,2], r[,2]) )
+  }
+  
+  df$datatype = as.factor( c(rep("K", nrow(k)), rep("GR", nrow(r))) )
+  df$datatype2 = as.factor( c( df$id[1:nrow(k)] , rep("GR", nrow(r))  )  )
+  df$datatype2 = factor(df$datatype2, levels = c( paste0("K", 1:nrow(k)), "GR")  )
+  
+  r = range(df$Dim1); r = (r[2]-r[1])*0.075
+  minmax = c( min(df$Dim1)-r, max(df$Dim1)+r  )
+  
+  r = range(df$Dim2); r = (r[2]-r[1])*0.075
+  yminmax = c( min(df$Dim2)-r, max(df$Dim2)+r  )
+    
+  w = which(df$datatype == "GR")
+  
+  df = tibble(df)
+  
+  CA_plots = lapply(2:l, function(x){
+    plot = df %>% ggplot( aes_string(x = "Dim1", y = paste0("Dim", x) ) ) +
+      geom_point( aes(col = datatype2, shape = datatype, size = datatype)) + 
+      geom_text(data = df[w, ], 
+                aes_string(x = "Dim1", 
+                           y = paste0("Dim", x),
+                           label = "id"),
+                vjust = 1, nudge_y = -0.07, 
+                 angle = 45,
+                check_overlap = TRUE) +
+      geom_text(data = df[-w, ], 
+                aes_string(x = "Dim1", 
+                           y =  paste0("Dim", x), 
+                           label = "id"),
+                color = "white") +
+      scale_color_manual(values = pcol ) +
+      scale_shape_manual(values = c(15, 19) ) +
+      scale_size_manual(values = c(3, 8) ) +
+      theme_bw( ) +
+      xlim(minmax) +
+      # ylim(yminmax) +
+      labs(x = paste0("Dimension 1 (",varexp[1],"%)"),
+           y = paste0("Dimension ",x," (",varexp[x],"%)"), title = pop) +
+      theme(legend.position = "none")
+      
+    return(plot)
+  
+  } )
+  
+  return(CA_plots)
+
+})
+
+```
+
+
+```{r, fig.width = 15, fig.height= 10}
+p_afr = ggpubr::ggarrange(plotlist = cob_CA_plots[[1]], nrow = 1, ncol = 3)
+p_eur = ggpubr::ggarrange(plotlist = cob_CA_plots[[2]], nrow = 1, ncol = 3)
+## south and east asia
+p = list( cob_CA_plots[[3]][[1]], cob_CA_plots[[3]][[2]], cob_CA_plots[[4]][[1]] )
+p_as = ggpubr::ggarrange(plotlist = p, nrow = 1, ncol = 3)
+
+P = ggpubr::ggarrange(p_afr, p_eur, p_as, nrow = 3, ncol = 1)
+
+
+f = paste0(resultsdir, "figures/COB_allCAR_CA_Plots_v2.pdf" )
+pdf(f, width = 12, height = 12)
+P
+dev.off()
+
+
+```
+
+
+## Base R UN Regional plots
+
+```{r, fig.width = 8, fig.height=10}
+f = paste0(resultsdir, "figures/PCA_w_UNRegions.pdf" )
+pdf(f, width = 8, height = 12)
+
+par(mfrow = c(4,3), oma = c(2,1,2,0), mar = c(5,5,2,1))
+for(pop in pops){
+  plotdata = my_cag_data[[pop]]
+  ## Variance Explained
+  varexp = my_varexp[[pop]][1:5]
+  varexp = round(varexp, d = 3)
+  ### Regions and Colors
+  r = levels(plotdata$un_region)
+  l = t(sapply(r, function(x){ 
+    w = which(plotdata$un_region %in% x)
+    count = length(w)
+    color = plotdata$un_region_pcol[w[1]]
+    return( c(count, color) )
+      }) )
+  plegend = data.frame(regions = r, pcol = l[,2], 
+                       count = as.numeric(l[,1]) )
+  plegend$region_ID = paste0(plegend$region, " n=", plegend$count )
+  # #################################################
+  # ## Order the plot data to have the rare 
+  # ## UN Regions at the bottom of the data frame
+  # #################################################
+  # r = names( sort( table( plotdata$un_region ), decreasing = TRUE ) )
+  # o = unlist( sapply(r, function(x){ which( plotdata$un_region %in% x )  }) )
+  # plotdata = plotdata[o,]
+  #################################################
+  ## PLOT
+  #################################################
+  for(j in 2:4){
+    plot(plotdata$PC1, plotdata[,j],
+         col = plotdata$un_region_pcol,
+         pch = 19,
+         cex = 0.75,
+         xlab = paste0("PC1 varexp = ", varexp[1], "%" ),
+         ylab = paste0("PC",j," varexp =  ", varexp[j], "%" ),
+         main = pop)
+    abline(h = 0, lty = 2, col = "grey", lwd = 0.75)
+    abline(v = 0, lty = 2, col = "grey", lwd = 0.75)
+    if(j == 3){
+      ## identify the proper color for each pop
+      p = levels(plotdata$pop)
+      cols = sapply(p, function(x){ 
+        w = which(plotdata$pop == x)[1]; return(plotdata$pcol[w]) 
+        })
+      ### plot the legend
+      if(pop == "AFR"){
+        legend("topleft", legend = plegend$region_ID, 
+             pch = 20, col = plegend$pcol, pt.cex = 1, cex = 0.5, bg = NULL)
+      } 
+      if(pop == "EUR"){
+        legend("bottomright", legend = plegend$region_ID, 
+             pch = 20, col = plegend$pcol, pt.cex = 1, cex = 0.5, bg = NULL)
+      } 
+      if(pop %in% c("SAS","EAS") ){
+        legend("topright", legend = plegend$region_ID, 
+             pch = 20, col = plegend$pcol, pt.cex = 1, cex = 0.5, bg = NULL)  
+      }
+      
+      }
+  }
+}
+
+dev.off()
+```
+
+
+##  UN Regional ggplots
+
+```{r, fig.width = 8, fig.height= 2}
+
+UN_Region_Plots = lapply(pops, function(pop){
+  ####################################
+  ## Define the working plot data set
+  ####################################
+  plotdata = my_cag_data[[pop]]
+  
+  ####################################
+  ## Define variance Explained
+  ####################################
+  varexp = my_varexp[[pop]][1:5]
+  varexp = round(varexp, d = 3)
+  
+  ####################################
+  ## Define Regions and Observational Counts
+  ####################################
+  # r = levels(plotdata$un_region)
+  # l = t(sapply(r, function(x){ 
+  #   w = which(plotdata$un_region %in% x)
+  #   count = length(w)
+  #   color = plotdata$un_region_pcol[w[1]]
+  #   return( c(count, color) )
+  #     }) )
+  ################################
+  ## define levels for UN Regions
+  ################################
+  # plotdata$un_region = factor(plotdata$un_region, levels = names( l[,1] ) )
+  plotdata$un_region = factor(plotdata$un_region, levels = UNregions$names )
+  ################################
+  ## PLOT
+  ################################
+  myplots = lapply(2:4, function(i){
+    pc = paste0("PC", i)
+    plotdata %>% ggplot( aes_string(x = "PC1", y = pc)  ) +
+    geom_point( aes(color = un_region), shape = 19 ) + 
+    scale_color_manual( values = UNregions$colors, drop = FALSE ) +
+    theme_bw() +
+    # scale_fill_manual( values = UNregions$colors, drop = FALSE ) +
+    labs(title = pop, 
+         color = "Geographic Regions", 
+         x = paste0("PC1  ", varexp[1], "%"),
+         y = paste0("PC", i, "  ", varexp[i], "%")) +
+    #guides(color=guide_legend(ncol=2)) +
+    guides(color=guide_legend(nrow=2,  override.aes = list(size=4) ) )
+  })
+  
+  p = ggpubr::ggarrange(plotlist = myplots,
+                    ncol=3, nrow=1,
+                    common.legend = TRUE,
+                    legend="right")
+  myplots$combined = p
+  return(myplots)
+})
+names(UN_Region_Plots) = pops
+
+f = paste0(resultsdir, "figures/UN_Region_Plots.Rdata" )
+save(UN_Region_Plots, file = f)
+
+
+```
+
+```{r}
+## MUST ADJUST CODE ABOVE FOR THE LEGEND TO BE IN COLUMNS
+# myplots = list(UN_Region_Plots[["AFR"]]$combined,
+#                UN_Region_Plots[["EUR"]]$combined,
+#                UN_Region_Plots[["SAS"]]$combined,
+#                UN_Region_Plots[["EAS"]]$combined)
+#   
+# f = paste0(resultsdir, "figures/PCA_w_UNRegions_v2.pdf" )
+# pdf(f, width = 11, height = 12)
+# ggpubr::ggarrange(plotlist = myplots,
+#                     ncol=1, nrow=3,
+#                     labels = c("A","B","C", "D"))
+# dev.off()
+```
+
+
+```{r}
+myplots = list(UN_Region_Plots[["AFR"]][[1]], UN_Region_Plots[["AFR"]][[2]], UN_Region_Plots[["AFR"]][[3]],
+               UN_Region_Plots[["EUR"]][[1]], UN_Region_Plots[["EUR"]][[2]], UN_Region_Plots[["EUR"]][[3]],
+               UN_Region_Plots[["SAS"]][[1]], UN_Region_Plots[["SAS"]][[2]], UN_Region_Plots[["SAS"]][[3]],
+               UN_Region_Plots[["EAS"]][[1]], UN_Region_Plots[["EAS"]][[2]], UN_Region_Plots[["EAS"]][[3]] )
+  
+f = paste0(resultsdir, "figures/PCA_w_UNRegions_v3.pdf" )
+pdf(f, width = 11, height = 13)
+ggpubr::ggarrange(plotlist = myplots,
+                    ncol=3, nrow=4,
+                    common.legend = TRUE,
+                    legend="bottom",
+                  labels = c("A","B","C",
+                             "D","E","F",
+                             "G","H","I",
+                             "J","K","L"))
+dev.off()
+
+```
+
+
+```{r}
+my_RE_plots = list(UN_Region_Plots[["AFR"]][[1]], 
+               UN_Region_Plots[["EUR"]][[1]],
+               UN_Region_Plots[["SAS"]][[1]],
+               UN_Region_Plots[["EAS"]][[1]])
+  
+REplots = ggpubr::ggarrange(plotlist = my_RE_plots,
+                    ncol=4, nrow=1,
+                    common.legend = TRUE,
+                    legend="bottom",
+                  labels = c("A","B","C","D"))
+
+f = paste0(resultsdir, "figures/PCA_w_UNRegions_v4.pdf" )
+pdf(f, width = 15, height = 4)
+REplots
+dev.off()
+
+```
+## Regional Centers
+
+```{r}
+regions = UNregions$names
+RE_centers = lapply(pops, function(pop){
+  wdata = my_cag_data[[pop]]
+  #####
+  recenters = t( sapply(regions, function(re){
+    w = which(wdata$un_region == re)
+    n = length(w)
+    if(n>=5){
+      pcs = paste0("PC", 1:4)
+      pc_centers = apply(wdata[w, pcs],2,  function(x){
+        mean(x)
+      })
+      out = c(pc_centers, n)
+    } else {
+      pc_centers = rep(NA, length(pcs)+1)
+      out = pc_centers
+    }
+    
+    return( out )
+  }) )
+  recenters = data.frame(recenters)
+  recenters$pop = pop
+  recenters$region = factor( regions, levels = regions)
+  colnames(recenters)[5] = "sample_size"
+  ## return to list
+  return(recenters)
+}) 
+
+names(RE_centers) = pops
+```
+
+```{r, fig.width = 6, fig.height = 2}
+RE_center_plots = lapply(pops, function(pop){
+  wdata = RE_centers[[pop]]
+  ####################################
+  ## Define variance Explained
+  ####################################
+  varexp = my_varexp[[pop]][1:5]
+  varexp = round(varexp, d = 3)
+  
+  xmin = min(wdata$PC1, na.rm = TRUE)
+  xmax = max(wdata$PC1, na.rm = TRUE)
+  delta = (xmax-xmin)*.25
+  xmax = xmax+delta
+  ###
+  out = wdata %>% ggplot(aes(x = PC1, y = PC2)) +
+    geom_point(aes(color = region ), size = 4, show.legend = TRUE ) +
+    geom_text(aes(label = region, color = region), 
+              check_overlap = TRUE, hjust = -0.1, show.legend = FALSE) +
+    xlim(xmin, xmax) +
+    scale_color_manual(values = UNregions$colors, drop = FALSE) +
+    guides(color=guide_legend(nrow=2, override.aes = list(size=4) ) ) +
+    # scale_size_continuous(limits=c(1,10), breaks=seq(2,10, by=1)) +
+    # guides(size=guide_legend(ncol=1) ) +
+    labs(title = pop, size = "sample size", color = "Geographic Region",
+         x = paste0("PC1  ", varexp[1], "%"),
+         y = paste0("PC2  ", varexp[2], "%") )  +
+    theme_bw()
+})
+  
+```
+
+```{r}
+Cplots = ggpubr::ggarrange(plotlist = RE_center_plots,
+                    ncol=4, nrow=1,
+                    common.legend = TRUE,
+                    legend="bottom",
+                  labels = c("E","F","G","H"))
+
+
+f = paste0(resultsdir, "figures/PCA_w_UNRegions_Centers.pdf" )
+pdf(f, width = 18, height = 4)
+Cplots
+dev.off()
+
+```
+
+```{r}
+x = list( UN_Region_Plots[["AFR"]][[1]],
+          UN_Region_Plots[["EUR"]][[1]],
+          UN_Region_Plots[["SAS"]][[1]],
+          UN_Region_Plots[["EAS"]][[1]],
+          RE_center_plots[[1]],
+          RE_center_plots[[2]],
+          RE_center_plots[[3]],
+          RE_center_plots[[4]]
+)
+
+
+# mps = ggpubr::ggarrange(REplots, Cplots,nrow = 2 )
+mps = ggpubr::ggarrange(plotlist = x, nrow = 2, ncol = 4,
+                        common.legend = TRUE,
+                        legend="bottom",
+                        labels = c("A","B","C","D", "E","F","G","H") )
+                        
+
+
+f = paste0(resultsdir, "figures/PCA_w_UNRegions_AND_Centers.pdf" )
+pdf(f, width = 16, height = 9)
+mps
+dev.off()
+
+
+```
+
+## All Region center plots 4x3
+
+
+```{r, fig.width = 6, fig.height = 2}
+RE_center_plots = lapply(pops, function(pop){
+  wdata = RE_centers[[pop]]
+  ####################################
+  ## Define variance Explained
+  ####################################
+  varexp = my_varexp[[pop]][1:5]
+  varexp = round(varexp, d = 3)
+  
+  myplots = lapply(2:4, function(i){
+    pc = paste0("PC", i)
+    ###
+    xmin = min(wdata$PC1, na.rm = TRUE)
+    xmax = max(wdata$PC1, na.rm = TRUE)
+    delta = (xmax-xmin)*.25
+    xmax = xmax+delta
+    ###
+    wdata %>% ggplot(aes_string(x = "PC1", y = pc)) +
+      geom_point(aes(color = region ), size = 4, show.legend = TRUE ) +
+      geom_text(aes(label = region, color = region), 
+                check_overlap = TRUE, hjust = -0.1, show.legend = FALSE) +
+      xlim(xmin, xmax) +
+      scale_color_manual(values = UNregions$colors, drop = FALSE) +
+      guides(color=guide_legend(nrow=2, override.aes = list(size=4) ) ) +
+      # scale_size_continuous(limits=c(1,10), breaks=seq(2,10, by=1)) +
+      # guides(size=guide_legend(ncol=1) ) +
+      labs(title = pop, size = "sample size", color = "Geographic Region",
+           x = paste0("PC1  ", varexp[1], "%"),
+           y = paste0("PC",i, "  ", varexp[i], "%") )  +
+      theme_bw()
+    
+  })
+  
+  
+  p = ggpubr::ggarrange(plotlist = myplots,
+                    ncol=3, nrow=1,
+                    common.legend = TRUE,
+                    legend="bottom")
+  myplots$combined = p
+  return(myplots)
+})
+
+names(RE_center_plots) = pops
+
+```
+
+```{r}
+mylist = list(RE_center_plots$AFR[[1]], 
+              RE_center_plots$AFR[[2]], RE_center_plots$AFR[[3]],
+              RE_center_plots$EUR[[1]], 
+              RE_center_plots$EUR[[2]], RE_center_plots$EUR[[3]], 
+              RE_center_plots$SAS[[1]], 
+              RE_center_plots$SAS[[2]], RE_center_plots$SAS[[3]], 
+              RE_center_plots$EAS[[1]], 
+              RE_center_plots$EAS[[2]], RE_center_plots$EAS[[3]] )
+
+ALL_Cplots = ggpubr::ggarrange(plotlist = mylist,
+                    ncol=3, nrow=4,
+                    common.legend = TRUE,
+                    legend="bottom",
+                  labels = c("A","B","C","D",
+                             "E","F","G","H",
+                             "I","J","K","L"))
+
+
+f = paste0(resultsdir, "figures/PCA_w_UNRegions_Centers_All.pdf" )
+pdf(f, width = 11, height = 13)
+ALL_Cplots
+dev.off()
+
+```
+
+
+# Country of Birth Plots
+
+```{r}
+REGIONS = list( "AFR" = c( "West Africa", "East Africa",
+             "Central Africa", "Southern Africa", 
+             "North Africa"),
+             "EUR" = c("Northern Europe", "Western Europe", 
+                       "Eastern Europe","Southern Europe"),
+             "EAS" = c("Eastern Asia", "SE Asia"),
+             "SAS" = c("Southern Asia"))
+
+```
+
+
+# A PCA for SAS Born in South Asia
+
+```{r, fig.width = 6, fig.height = 1.5}
+###################
+## POPULATION
+###################
+pop = "SAS"
+
+###################
+## Which CAG data to look at?
+###################
+plotdata = my_cag_data[[pop]]
+
+###################
+## Limit the samples 
+## to those born in that region
+###################
+RE = REGIONS[[pop]]
+w = which(plotdata$un_region %in% RE)
+plotdata = plotdata[w, ]
+
+###################
+## order
+###################
+n = names( sort(table(plotdata$cob), decreasing = TRUE ) )
+country_count = length(n)
+##
+plotdata$cob = factor(plotdata$cob, levels = n)
+o = unlist( sapply(n, function(x){
+  which(plotdata$cob %in% x)
+}) )
+plotdata = plotdata[o,]
+
+#####################
+## Define Country Levels
+#####################
+plotdata$cob = factor(plotdata$cob, levels = n)
+
+#####################
+## Define colors for countries
+#####################
+pcol = brewer.pal(country_count, "Set1")
+
+####################################
+## Define variance Explained
+####################################
+varexp = my_varexp[[pop]][1:5]
+varexp = round(varexp, d = 3)
+
+################################
+## PLOT
+################################
+myplots = lapply(2:4, function(i){
+  pc = paste0("PC", i)
+  plotdata %>% ggplot( aes_string(x = "PC1", y = pc)  ) +
+    geom_point( aes(color = cob), shape = 19 ) + 
+    scale_color_manual( values = pcol, drop = FALSE ) +
+    theme_bw() +
+    # scale_fill_manual( values = UNregions$colors, drop = FALSE ) +
+    labs(color = "Country", 
+         x = paste0("PC1  ", varexp[1], "%"),
+         y = paste0("PC", i, "  ", varexp[i], "%"),
+         title = RE) +
+    #guides(color=guide_legend(ncol=2)) +
+    guides(color=guide_legend(ncol=2,  override.aes = list(size=4) ) )
+})
+
+SAS_Country_Plot = ggpubr::ggarrange(plotlist = myplots,
+                                     ncol=3, nrow=1,
+                                     common.legend = TRUE,
+                                     legend="right")
+# 
+f = paste0(resultsdir, "figures/Country_of_Birth/CountryOfBirth_SAS.pdf" )
+pdf(f, width = 12, height = 3)
+SAS_Country_Plot
+dev.off()
+
+```
+
+# A PCA for EAS Born in East Asia
+
+
+```{r, fig.width = 6, fig.height = 1.5}
+###################
+## POPULATION
+###################
+pop = "EAS"
+
+###################
+## Which CAG data to look at?
+###################
+plotdata = my_cag_data[[pop]]
+
+###################
+## Limit the samples 
+## to those born in that region
+###################
+RE = REGIONS[[pop]]
+w = which(plotdata$un_region %in% RE)
+plotdata = plotdata[w, ]
+
+###################
+## order
+###################
+n = names( sort(table(plotdata$cob), decreasing = TRUE ) )
+country_count = length(n)
+##
+plotdata$cob = factor(plotdata$cob, levels = n)
+o = unlist( sapply(n, function(x){
+  which(plotdata$cob %in% x)
+}) )
+plotdata = plotdata[o,]
+
+#####################
+## Define Country Levels
+#####################
+plotdata$cob = factor(plotdata$cob, levels = n)
+
+#####################
+## Define colors for countries
+#####################
+set1_cols = brewer.pal(9, "Set1")
+othercolors = c("cyan1","chartreuse1","deeppink","goldenrod1", 
+                "firebrick4", "darkblue", "darkgreen","darkmagenta",
+                "black")
+pcol = c( set1_cols, othercolors  )
+
+
+
+####################################
+## Define variance Explained
+####################################
+varexp = my_varexp[[pop]][1:5]
+varexp = round(varexp, d = 3)
+
+################################
+## PLOT
+################################
+myplots = lapply(2:4, function(i){
+  pc = paste0("PC", i)
+  plotdata %>% ggplot( aes_string(x = "PC1", y = pc)  ) +
+    geom_point( aes(color = cob), shape = 19 ) + 
+    scale_color_manual( values = pcol, drop = FALSE ) +
+    theme_bw() +
+    # scale_fill_manual( values = UNregions$colors, drop = FALSE ) +
+    labs(color = "Country", 
+         x = paste0("PC1  ", varexp[1], "%"),
+         y = paste0("PC", i, "  ", varexp[i], "%"),
+         title = "East and S.E. Asia") +
+    #guides(color=guide_legend(ncol=2)) +
+    guides(color=guide_legend(ncol=2,  override.aes = list(size=4) ) )
+})
+
+EAS_Country_Plot = ggpubr::ggarrange(plotlist = myplots,
+                                     ncol=3, nrow=1,
+                                     common.legend = TRUE,
+                                     legend="right")
+# 
+f = paste0(resultsdir, "figures/Country_of_Birth/CountryOfBirth_EAS.pdf" )
+pdf(f, width = 12, height = 3)
+EAS_Country_Plot
+dev.off()
+
+```
+
+
+```{r}
+myplots = list(SAS_Country_Plot, EAS_Country_Plot)
+Asia_Country_Plot = ggpubr::ggarrange(plotlist = myplots,
+                                     ncol=1, nrow=2,
+                                     labels = c("A","B") )
+f = paste0(resultsdir, "figures/Country_of_Birth/CountryOfBirth_Asia.pdf" )
+pdf(f, width = 12, height = 6)
+Asia_Country_Plot
+dev.off()
+
+```
+
+
+## AFR Colors
+
+```{r}
+##########################
+## Asia Colors
+##########################
+set1_cols = brewer.pal(9, "Set1")
+othercolors = c("cyan1","chartreuse1","deeppink","goldenrod1", 
+                "firebrick4", "darkblue", "darkgreen","darkmagenta",
+                "black")
+East_Asia_pcol = c( set1_cols, othercolors  )
+
+South_Asia_pcol = brewer.pal(5, "Set1")
+##########################
+## Africa Colors
+##########################
+
+
+## West AFR
+set1_cols = brewer.pal(8, "Set1")
+othercolors = c("cyan1", "darkblue", "chartreuse", "magenta", "black",
+                "grey")
+West = c( set1_cols, othercolors  )
+
+## Central AFR
+set1_cols = brewer.pal(6, "Set1")
+othercolors = c("grey")
+Central = c( set1_cols, othercolors  )
+
+## East Africa
+set1_cols = brewer.pal(8, "Set1")
+othercolors = c("cyan1", "darkblue", "chartreuse", "magenta", "black",
+                "grey")
+East = c( set1_cols, othercolors  )
+
+## Northern and Southern Africa
+set1_cols = brewer.pal(5, "Set1")
+othercolors = c("black","grey")
+NS = c( set1_cols, othercolors  )
+
+AFR_colors = list(East = East, Central = Central, West = West, 
+                  "North and South" = NS)
+
+```
+
+
+
+# A PCA for AFR Born in Africa
+
+```{r, fig.width = 6, fig.height = 1.5}
+###################
+## POPULATION
+###################
+pop = "AFR"
+###################
+## Which CAG data to look at?
+###################
+wdata = my_cag_data[[pop]]
+###################
+## Limit the samples 
+## to those born in that region
+###################
+RE = REGIONS[[pop]]
+RE = list(East = RE[1], 
+          Central = RE[3],
+          West = RE[2],
+          "North and South" = RE[c(4,5)])
+
+afr_country_plots = lapply( names(RE), function(region){
+  ## Define plot data for AFR
+  w = which(wdata$un_region %in% unlist(RE))
+  plotdata = wdata[w, ]
+  ## Turn other samples outside of the 
+  ## region of focus to other
+  r = RE[[region]]
+  w = which(plotdata$un_region %in% r)
+  plotdata$cob[-w] = "other"
+  
+  ###################
+  ## order
+  ###################
+  n = names( sort(table(plotdata$cob), decreasing = TRUE ) )
+  country_count = length(n)
+  ##
+  plotdata$cob = factor(plotdata$cob, levels = n)
+  o = unlist( sapply(n, function(x){
+    which(plotdata$cob %in% x)
+  }) )
+  plotdata = plotdata[o,]
+  
+  #####################
+  ## Define Country Levels
+  #####################
+  w = which(n == "other")
+  n = c(n[-w], n[w])
+  plotdata$cob = factor(plotdata$cob, levels = n)
+  
+  #####################
+  ## Define colors for countries
+  #####################
+  pcol = AFR_colors[[region]]
+  
+  ####################################
+  ## Define variance Explained
+  ####################################
+  varexp = my_varexp[[pop]][1:5]
+  varexp = round(varexp, d = 3)
+
+  ####################################
+  ## PLOT
+  ####################################
+  col_count = c(2,1,2,1)
+  names(col_count) = names(RE)
+  
+  region_plots = lapply(2:4, function(i){
+    pc = paste0("PC", i)
+    plotdata %>% ggplot( aes_string(x = "PC1", y = pc)  ) +
+      geom_point( aes(color = cob), shape = 19 ) + 
+      scale_color_manual( values = pcol, drop = FALSE ) +
+      theme_bw() +
+      # scale_fill_manual( values = UNregions$colors, drop = FALSE ) +
+      labs(color = "Country", 
+           x = paste0("PC1  ", varexp[1], "%"),
+           y = paste0("PC", i, "  ", varexp[i], "%"), 
+           title = region) +
+      #guides(color=guide_legend(ncol=2)) +
+      guides(color=guide_legend(ncol = col_count[region],  
+                                override.aes = list(size=4) ) )
+  })
+
+  region_plots$combined = ggpubr::ggarrange(plotlist = region_plots,
+                                     ncol=3, nrow=1,
+                                     common.legend = TRUE,
+                                     legend="right")
+
+  return(region_plots)
+  
+
+} )
+
+names(afr_country_plots) = names(RE)
+
+```
+
+
+```{r, fig.width = 8, fig.height = 2}
+# afr_country_plots[[3]][[4]]
+
+myplots = list(afr_country_plots[[1]][[4]],
+               afr_country_plots[[2]][[4]],
+               afr_country_plots[[3]][[4]],
+               afr_country_plots[[4]][[4]])
+
+AFR_Country_Plot = ggpubr::ggarrange(plotlist = myplots,
+                                     ncol=1, nrow=4,
+                                     labels = c("A","B","C","D"))
+
+f = paste0(resultsdir, "figures/Country_of_Birth/CountryOfBirth_AFR_v0.pdf" )
+pdf(f, width = 11, height = 13)
+AFR_Country_Plot
+dev.off()
+
+```
+
+
+```{r}
+myplots = list(CentralAFR_plots[[1]],
+               WestAFR_plots[[2]],
+               EastAFR_plots[[3]],
+               NS_AFR_plots[[1]])
+
+AFR_Country_Plot = ggpubr::ggarrange(plotlist = myplots,
+                                     ncol=2, nrow=2,
+                                     labels = c("A","B","C","D"))
+
+f = paste0(resultsdir, "figures/Country_of_Birth/CountryOfBirth_AFR.pdf" )
+pdf(f, width = 12, height = 6)
+AFR_Country_Plot
+dev.off()
+
+
+```
+
+
+## EUR Colors
+
+```{r}
+## North EUR
+set1_cols = brewer.pal(8, "Set1")
+othercolors = c("cyan1", "darkblue", "chartreuse", "magenta", "firebrick4",
+                "cadetblue1", "darkblue","darkgreen","darkmagenta",
+                "grey")
+North = c( set1_cols, othercolors  )
+
+## East EUR
+set1_cols = brewer.pal(8, "Set1")
+othercolors = c("cyan1", "black", 
+                "grey")
+East = c( set1_cols, othercolors  )
+
+## South EUR
+set1_cols = brewer.pal(8, "Set1")
+othercolors = c("cyan1", "darkblue", "chartreuse", "magenta", "firebrick4",
+                "black", 
+                "grey")
+South = c( set1_cols, othercolors  )
+
+## West EUR
+set1_cols = brewer.pal(8, "Set1")
+othercolors = c("grey")
+West = c( set1_cols, othercolors  )
+
+
+###### Combine
+EUR_colors = list(Northern = North,
+                  Eastern = East, 
+                  Southern = South,
+                  Western = West)
+
+```
+
+
+
+# A PCA for EUR Born in Europe
+
+```{r, fig.width = 6, fig.height = 1.5}
+###################
+## POPULATION
+###################
+pop = "EUR"
+###################
+## Which CAG data to look at?
+###################
+wdata = my_cag_data[[pop]]
+###################
+## Limit the samples 
+## to those born in that region
+###################
+RE = REGIONS[[pop]]
+RE = list(Northern = RE[1],
+          Eastern = RE[3],
+          Southern = RE[4],
+          Western = RE[2])
+
+eur_country_plots = lapply( names(RE), function(region){
+  ## Define plot data for AFR
+  w = which(wdata$un_region %in% unlist(RE))
+  plotdata = wdata[w, ]
+  ## Turn other samples outside of the 
+  ## region of focus to other
+  r = RE[[region]]
+  w = which(plotdata$un_region %in% r)
+  plotdata$cob[-w] = "other"
+  
+  ###################
+  ## order
+  ###################
+  n = names( sort(table(plotdata$cob), decreasing = TRUE ) )
+  country_count = length(n)
+  ##
+  plotdata$cob = factor(plotdata$cob, levels = n)
+  o = unlist( sapply(n, function(x){
+    which(plotdata$cob %in% x)
+  }) )
+  plotdata = plotdata[o,]
+  
+  #####################
+  ## Define Country Levels
+  #####################
+  w = which(n == "other")
+  n = c(n[-w], n[w])
+  plotdata$cob = factor(plotdata$cob, levels = n)
+  
+  #####################
+  ## Define colors for countries
+  #####################
+  pcol = EUR_colors[[region]]
+  
+  ####################################
+  ## Define variance Explained
+  ####################################
+  varexp = my_varexp[[pop]][1:5]
+  varexp = round(varexp, d = 3)
+
+  ####################################
+  ## PLOT
+  ####################################
+  
+  region_plots = lapply(2:4, function(i){
+    pc = paste0("PC", i)
+    plotdata %>% ggplot( aes_string(x = "PC1", y = pc)  ) +
+      geom_point( aes(color = cob), shape = 19 ) + 
+      scale_color_manual( values = pcol, drop = FALSE ) +
+      theme_bw() +
+      # scale_fill_manual( values = UNregions$colors, drop = FALSE ) +
+      labs(color = "Country", 
+           x = paste0("PC1  ", varexp[1], "%"),
+           y = paste0("PC", i, "  ", varexp[i], "%"), 
+           title = region) +
+      #guides(color=guide_legend(ncol=2)) +
+      guides(color=guide_legend(ncol = 2,  
+                                override.aes = list(size=4) ) )
+  })
+
+  region_plots$combined = ggpubr::ggarrange(plotlist = region_plots,
+                                     ncol=3, nrow=1,
+                                     common.legend = TRUE,
+                                     legend="right")
+
+  return(region_plots)
+  
+
+} )
+
+names(eur_country_plots) = names(RE)
+
+```
+
+```{r, fig.width = 8, fig.height = 2}
+# afr_country_plots[[3]][[4]]
+
+myplots = list(eur_country_plots[[1]][[4]],
+               eur_country_plots[[2]][[4]],
+               eur_country_plots[[3]][[4]],
+               eur_country_plots[[4]][[4]])
+
+EUR_Country_Plot = ggpubr::ggarrange(plotlist = myplots,
+                                     ncol=1, nrow=4,
+                                     labels = c("A","B","C","D"))
+
+f = paste0(resultsdir, "figures/Country_of_Birth/CountryOfBirth_EUR_v0.pdf" )
+pdf(f, width = 11, height = 13)
+EUR_Country_Plot
+dev.off()
+
+```
+
+## EUR PC Centers
+
+```{r}
+pop = "EUR"
+wdata = my_cag_data[[pop]]
+## limit to those born in Europe
+RE = REGIONS[[pop]]
+w = which(wdata$un_region %in% RE)
+wdata = wdata[w, ]
+##
+countries = sort( unique(wdata$cob) )
+
+EUR_PC_Centers = t( sapply(countries, function(country){
+  w = which(wdata$cob == country)
+  out = apply(wdata[w, paste0("PC", 1:5) ], 2, mean)
+  return(out)
+}) )
+###########
+EUR_PC_Centers = data.frame(EUR_PC_Centers)
+###########
+EUR_PC_Centers$country = rownames(EUR_PC_Centers)
+####################
+### Add Regions
+####################
+r = sapply(countries, function(country){
+  w = which(wdata$cob == country)[1]
+  out = wdata$un_region[w]
+  return(out)
+})
+EUR_PC_Centers$region = r
+EUR_PC_Centers$region = factor(EUR_PC_Centers$region, 
+                               levels = sort( as.character( unique(EUR_PC_Centers$region) ) ) )
+
+####################
+### Add Country Sample Size
+####################
+SS = sapply(countries, function(country){
+  w = which(wdata$cob == country)
+  out = length(w)
+  return(out)
+})
+EUR_PC_Centers$sample_size = log(SS)
+
+####################
+### Remove those with a 
+### Sample size of 0
+####################
+w = which(EUR_PC_Centers$sample_size == 0)
+if(length(w)>0){
+  EUR_PC_Centers = EUR_PC_Centers[-w,]
+}
+###########
+pcol = RColorBrewer::brewer.pal(4, "Set1")
+
+EUR_PC_Center_Plots = lapply(2:4, function(i){
+  pc = paste0("PC", i)
+  EUR_PC_Centers %>% ggplot(aes_string(x = "PC1", y = pc)) + 
+  #geom_point( aes(color = region, size = sample_size), alpha = 0.5) + 
+  geom_point( aes(color = region), size = 4 , alpha = 0.5) + 
+  geom_text(aes(label = country, color = region), 
+            check_overlap = FALSE, 
+            size = 3.5,
+            hjust = -0.15, alpha = 0.7) +
+  scale_color_manual( values = pcol, drop = FALSE ) +
+  guides(color = guide_legend(override.aes = list(shape = 19, 
+                                                  size = 4, 
+                                                  alpha = 1) ) ) +
+  labs(size = "sample size") +
+  labs(title = "Europe") +
+  theme_bw() 
+})
+
+EURCenters = ggpubr::ggarrange(plotlist = EUR_PC_Center_Plots,
+                                     ncol=3, nrow=1,
+                                     common.legend = TRUE,
+                                     legend="right")
+
+f = paste0(resultsdir, "figures/Country_Centers_EUR.pdf" )
+pdf(f, width = 15, height = 4.5)
+EURCenters
+dev.off()
+
+  
+```
+
+## AFR PC Centers
+
+```{r}
+pop = "AFR"
+wdata = my_cag_data[[pop]]
+## limit to those born in Europe
+RE = REGIONS[[pop]]
+w = which(wdata$un_region %in% RE)
+wdata = wdata[w, ]
+##
+countries = sort( unique(wdata$cob) )
+
+AFR_PC_Centers = t( sapply(countries, function(country){
+  w = which(wdata$cob == country)
+  out = apply(wdata[w, paste0("PC", 1:5) ], 2, mean)
+  return(out)
+}) )
+###########
+AFR_PC_Centers = data.frame(AFR_PC_Centers)
+###########
+AFR_PC_Centers$country = rownames(AFR_PC_Centers)
+####################
+### Add Regions
+####################
+r = sapply(countries, function(country){
+  w = which(wdata$cob == country)[1]
+  out = wdata$un_region[w]
+  return(out)
+})
+AFR_PC_Centers$region = r
+AFR_PC_Centers$region = factor(AFR_PC_Centers$region, 
+                               levels = sort( as.character( unique(AFR_PC_Centers$region) ) ) )
+
+####################
+### Add Country Sample Size
+####################
+SS = sapply(countries, function(country){
+  w = which(wdata$cob == country)
+  out = length(w)
+  return(out)
+})
+AFR_PC_Centers$sample_size = SS
+AFR_PC_Centers$log_sample_size = log(SS)
+
+####################
+### Remove those with a 
+### Sample size of 0
+####################
+w = which(AFR_PC_Centers$sample_size < 5)
+if(length(w)>0){
+  AFR_PC_Centers = AFR_PC_Centers[-w,]
+}
+###########
+pcol = RColorBrewer::brewer.pal(length(RE), "Set1")
+
+AFR_PC_Center_Plots = lapply(2:4, function(i){
+  pc = paste0("PC", i)
+  AFR_PC_Centers %>% ggplot(aes_string(x = "PC1", y = pc)) + 
+  #geom_point( aes(color = region, size = sample_size), alpha = 0.5) + 
+  geom_point( aes(color = region), size = 4 , alpha = 0.5) + 
+  geom_text(aes(label = country, color = region), 
+            check_overlap = FALSE, 
+            hjust = -0.15, alpha = 0.7,
+            size = 3.5) +
+  scale_color_manual( values = pcol, drop = FALSE ) +
+  guides(color = guide_legend(override.aes = list(shape = 19, 
+                                                  size = 4, 
+                                                  alpha = 1) ) ) +
+  labs(size = "sample size") +
+  labs(title = "Africa") +
+  theme_bw() 
+})
+
+AFRCenters = ggpubr::ggarrange(plotlist = AFR_PC_Center_Plots,
+                                     ncol=3, nrow=1,
+                                     common.legend = TRUE,
+                                     legend="right")
+
+f = paste0(resultsdir, "figures/Country_Centers_AFR.pdf" )
+pdf(f, width = 15, height = 4.5)
+AFRCenters
+dev.off()
+
+  
+```
+
+
+
+```{r}
+
+###################
+## order
+###################
+n = names( sort(table(plotdata$cob), decreasing = TRUE ) )
+country_count = length(n)
+##
+plotdata$cob = factor(plotdata$cob, levels = n)
+o = unlist( sapply(n, function(x){
+  which(plotdata$cob %in% x)
+}) )
+plotdata = plotdata[o,]
+ 
+```
+
+
+## EAS PC Centers
+
+```{r}
+pop = "EAS"
+wdata = my_cag_data[[pop]]
+## limit to those born in Europe
+RE = REGIONS[[pop]]
+w = which(wdata$un_region %in% RE)
+wdata = wdata[w, ]
+
+###################
+## order
+###################
+n = names( sort(table(wdata$cob), decreasing = TRUE ) )
+wdata$cob = factor(wdata$cob, levels = n)
+
+######################
+countries = levels(wdata$cob) 
+
+PC_Centers = t( sapply(countries, function(country){
+  w = which(wdata$cob == country)
+  out = apply(wdata[w, paste0("PC", 1:5) ], 2, mean)
+  return(out)
+}) )
+###########
+PC_Centers = data.frame(PC_Centers)
+###########
+PC_Centers$country = rownames(PC_Centers)
+####################
+### Add Regions
+####################
+r = sapply(countries, function(country){
+  w = which(wdata$cob == country)[1]
+  out = wdata$un_region[w]
+  return(out)
+})
+PC_Centers$region = r
+PC_Centers$region = factor(PC_Centers$region, 
+                               levels = sort( as.character( unique(PC_Centers$region) ) ) )
+
+####################
+### Add Country Sample Size
+####################
+SS = sapply(countries, function(country){
+  w = which(wdata$cob == country)
+  out = length(w)
+  return(out)
+})
+PC_Centers$sample_size = SS
+PC_Centers$log_sample_size = log(SS)
+
+####################
+### Remove those with a 
+### Sample size of 0
+####################
+w = which(PC_Centers$sample_size < 5)
+if(length(w)>0){
+  PC_Centers = PC_Centers[-w,]
+}
+
+### DEFINE COUNTRY LEVELS
+PC_Centers$country = factor(PC_Centers$country, levels = n)
+# summary(PC_Centers$PC1)
+
+###########
+#pcol = RColorBrewer::brewer.pal(length(RE), "Set1")
+pcol = East_Asia_pcol
+
+PC_Center_Plots = lapply(2:4, function(i){
+  pc = paste0("PC", i)
+  PC_Centers %>% ggplot(aes_string(x = "PC1", y = pc)) + 
+  # geom_point( aes(color = country, size = log_sample_size)) + 
+  geom_point( aes(color = country ), size = 4) + 
+  geom_text(aes(label = country, color = country),  
+            check_overlap = TRUE,
+            hjust = -0.15) +
+  xlim(-0.0315, 0.05) +
+  scale_color_manual( values = pcol, drop = FALSE ) +
+  guides(color = guide_legend(ncol = 2,
+                              override.aes = list(shape = 19, 
+                                                  size = 4, 
+                                                  alpha = 1) ) ) +
+  labs(title = "East and SE Asia") +
+    # labs(size = "sample size") +
+  theme_bw() 
+})
+
+EASCenters = ggpubr::ggarrange(plotlist = PC_Center_Plots,
+                                     ncol=3, nrow=1,
+                                     common.legend = TRUE,
+                                     legend="right")
+
+f = paste0(resultsdir, "figures/Country_Centers_EAS_v0.pdf" )
+pdf(f, width = 15, height = 4.5)
+EASCenters
+dev.off()
+
+  
+```
+
+## SAS PC Centers
+
+```{r}
+pop = "SAS"
+wdata = my_cag_data[[pop]]
+## limit to those born in Europe
+RE = REGIONS[[pop]]
+w = which(wdata$un_region %in% RE)
+wdata = wdata[w, ]
+###################
+## order
+###################
+n = names( sort(table(wdata$cob), decreasing = TRUE ) )
+wdata$cob = factor(wdata$cob, levels = n)
+
+##
+countries = sort( unique(wdata$cob) )
+
+PC_Centers = t( sapply(countries, function(country){
+  w = which(wdata$cob == country)
+  out = apply(wdata[w, paste0("PC", 1:5) ], 2, mean)
+  return(out)
+}) )
+###########
+PC_Centers = data.frame(PC_Centers)
+###########
+PC_Centers$country = countries
+####################
+### Add Regions
+####################
+r = sapply(countries, function(country){
+  w = which(wdata$cob == country)[1]
+  out = wdata$un_region[w]
+  return(out)
+})
+PC_Centers$region = r
+PC_Centers$region = factor(PC_Centers$region, 
+                               levels = sort( as.character( unique(PC_Centers$region) ) ) )
+
+####################
+### Add Country Sample Size
+####################
+SS = sapply(countries, function(country){
+  w = which(wdata$cob == country)
+  out = length(w)
+  return(out)
+})
+PC_Centers$sample_size = SS
+PC_Centers$log_sample_size = log(SS)
+
+####################
+### Remove those with a 
+### Sample size of 0
+####################
+w = which(PC_Centers$sample_size < 5)
+if(length(w)>0){
+  PC_Centers = PC_Centers[-w,]
+}
+
+### DEFINE COUNTRY LEVELS
+PC_Centers$country = factor(PC_Centers$country, levels = n)
+#summary(PC_Centers$PC1)
+
+###########
+#pcol = RColorBrewer::brewer.pal(3, "Set1")[1]
+pcol = East_Asia_pcol
+
+PC_Center_Plots = lapply(2:4, function(i){
+  pc = paste0("PC", i)
+  PC_Centers %>% ggplot(aes_string(x = "PC1", y = pc)) + 
+  geom_point( aes(color = country), size = 4 ) + 
+  geom_text( aes(label = country, color = country),
+            check_overlap = TRUE, hjust = -0.15) +
+  scale_color_manual( values = pcol, drop = FALSE ) +
+  xlim(-0.0135, 0.0035) +
+  guides(color = guide_legend(ncol = 2, override.aes = list(shape = 19, 
+                                                  size = 4, 
+                                                  alpha = 1) ) ) +
+  #labs(size = "sample size") +
+  labs(title = "Southern Asia") +
+  theme_bw() 
+})
+
+SASCenters = ggpubr::ggarrange(plotlist = PC_Center_Plots,
+                                     ncol=3, nrow=1,
+                                     common.legend = TRUE,
+                                     legend="right")
+
+f = paste0(resultsdir, "figures/Country_Centers_SAS_v0.pdf" )
+pdf(f, width = 15, height = 4.5)
+SASCenters
+dev.off()
+
+  
+```
+
+
+```{r}
+x = list(AFRCenters, EURCenters, SASCenters, EASCenters)
+  
+CCenters = ggpubr::ggarrange(plotlist = x,
+                                     ncol=1, nrow=4,
+                                     labels = c("A","B","C","D"))
+
+f = paste0(resultsdir, "figures/Country_Centers_v0.pdf" )
+pdf(f, width = 11, height = 13)
+CCenters
+dev.off()
+
+```
+
+
+# Following up on some interesting observations
+
+
+## 1. SAS observations
+
+
+```{r}
+mydata = my_cag_data[["SAS"]]
+##
+table( mydata$cob)
+```
+
+a) K-clusters by UN Regions
+
+```{r}
+mydata = my_cag_data[["SAS"]]
+##
+table( mydata$un_region,  mydata$k)
+```
+b) Country of births for K2
+
+```{r}
+w = which( as.character( mydata$k ) == "K2")
+# table( mydata$cob[w] )
+table( mydata$cob[w], mydata$SRE[w] )
+```
+
+c) Other East African Countries of birth not in K2
+
+```{r}
+w = which( as.character( mydata$k ) != "K2" & as.character( mydata$un_region) == "east_africa"  )
+###
+table( mydata$cob[w], mydata$k[w] )
+table( mydata$cob[w], mydata$SRE[w] )
+```
+
+```{r}
+cor.test(mydata$PC2, mydata$home_north, method = "sp")
+cor.test(mydata$PC2, mydata$home_east, method = "sp")
+
+par(mfrow = c(1,2) )
+plot(mydata$PC2, mydata$home_north)
+plot(mydata$home_east, mydata$home_north, 
+     bg = brewer.pal(4, "Set1")[as.factor(mydata$k)], pch = 21, cex = 2 )
+
+```
+
+

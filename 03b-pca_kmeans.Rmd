@@ -1,0 +1,716 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(RColorBrewer)
+library(moosefun)
+source("DetermineK.R")
+
+pfile = "parameters/pfile.txt" 
+pardata = read.table(pfile, header = FALSE, sep = "=", as.is = TRUE)
+
+```
+
+## Read in and format the data
+
+```{r}
+w = which(pardata[,1] == "RESULTSDIR")
+results_dir = pardata[w,2]
+smartpca_dir = paste0(results_dir, "smartpca/")
+## Identify smartPCA files
+files = list.files(smartpca_dir)
+w = grep("eigen", files)
+files = files[w]
+## Population IDs
+pops = c("AFR","EUR","SAS","EAS")
+# pops = c("AFR", "SAS","EAS")
+## Read in the data
+mydata = lapply(pops, function(pop){
+    ## Read in the eigenvalues and estimate the variance explained
+    f = paste0(smartpca_dir, pop, ".eigenvalues")
+    varexp = read.table( f, header = FALSE, as.is = TRUE )[,1]
+    varexp = varexp/sum(varexp) *100
+    ## Read in the eigenvectors or PCs
+    f = paste0(smartpca_dir, pop, ".eigenvectors")
+    pcs = read.table( f, header = FALSE, as.is = TRUE)
+    colnames(pcs) = c("ID", paste0("PC", 1:100), "pop")
+    pcs$pop = gsub("UKBB_relatives","UKBB", pcs$pop )
+    ###
+    pop_order = sort(unique(pcs$pop))
+    w = which(pop_order == "UKBB")
+    pop_order = pop_order[-w]
+    pop = factor(pcs$pop, levels = c("UKBB", pop_order))
+    pcs$pop = pop
+    ### reorder data frame for UKBB first
+    w = grep("UKBB", pop)
+    pcs = rbind(pcs[w, ], pcs[-w,])
+    ### add color
+    cols = RColorBrewer::brewer.pal( length(unique(pop_order)) , "Set1")
+    cols = c("grey",cols)
+    pcs$pcol = cols[ as.factor( pcs$pop ) ]
+    ## add shapes
+    pcs$ppch =  c(1, rep(20,length(pop_order)) )[pcs$pop]
+    ## add shape size
+    pcs$pcex =  c(1, rep(2,length(pop_order)) )[pcs$pop]
+    ## 
+    out = list(pcs = pcs, varexp = varexp)
+    return(out)
+
+})
+names(mydata) = pops
+
+```
+
+## plot the scree plots for the PCs
+
+```{r, fig.width = 6, fig.height = 3}
+figures_dir = paste0(results_dir, "figures/")
+f = paste0(figures_dir, "plot01_Scree.pdf")
+####
+pdf( f , width = 8, height = 8)
+par(mfrow = c(2,2), oma = c(2,1,2,0), mar = c(5,5,2,1))
+for(i in 1:length(pops)){
+  plot( mydata[[i]]$varexp[1:20], pch = 21, cex = 1.5, bg = "grey", type = "b",
+        main = names(mydata)[i],
+        xlab = "PC", ylab = "% Variance Explained")
+  abline(h = 0.1, col = "black", lty = 2, lwd =2)
+}
+dev.off()
+```
+
+## Plot the PCs with 1KG pops
+
+```{r, fig.width = 10, fig.height = 8}
+f = paste0(figures_dir, "plot02_continental_PCs.pdf")
+pdf(f, width = 8, height = 9)
+
+par(mfrow = c(4,3), oma = c(2,1,2,0), mar = c(5,5,2,1))
+for(i in 1:length(pops)){
+  pop = names(mydata)[i]
+  varexp = signif( mydata[[i]]$varexp[1:20] , d = 3)
+  plotdata = mydata[[i]]$pcs
+  plotdata = plotdata[, c("PC1","PC2","PC3","PC4", "PC5", "pop","pcol","ppch" ,"pcex")]
+  for(j in 2:4){
+    plot(plotdata$PC1, plotdata[,j],
+         col = plotdata$pcol,
+         pch = plotdata$ppch,
+         cex = plotdata$pcex,
+         xlab = paste0("PC1 varexp = ", varexp[1], "%" ),
+         ylab = paste0("PC",j," varexp =  ", varexp[j], "%" ),
+         main = pop)
+    abline(h = 0, lty = 2, col = "grey", lwd = 0.75)
+    abline(v = 0, lty = 2, col = "grey", lwd = 0.75)
+    if(j == 3){
+      ## identify the proper color for each pop
+      p = levels(plotdata$pop)
+      cols = sapply(p, function(x){ 
+        w = which(plotdata$pop == x)[1]; return(plotdata$pcol[w]) 
+        })
+      ### plot the legend
+      if(pop == "AFR"){
+        legend("topleft", legend = levels(plotdata$pop), 
+             pch = 20, col = cols, pt.cex = 2.5, cex = 0.75, bg = NULL)
+      } 
+      if(pop == "EUR"){
+        legend("bottomright", legend = levels(plotdata$pop), 
+             pch = 20, col = cols, pt.cex = 2.5, cex = 0.75, bg = NULL)
+      }
+      if(pop %in% c("EAS" , "SAS") ){
+          legend("topright", legend = levels(plotdata$pop), 
+               pch = 20, col = cols, pt.cex = 2.5, cex = 0.75, bg = NULL)  
+        }
+     }
+  }
+}
+
+dev.off()
+
+```
+
+
+```{r, fig.width = 8, fig.height= 2}
+
+ReferencePop_Plots = lapply(pops, function(pop){
+  ####################################
+  ## Define the working plot data set
+  ####################################
+  plotdata = mydata[[pop]]$pcs
+  l = length( levels(plotdata$pop) ) -1
+  plot_colors = c( "grey", RColorBrewer::brewer.pal(l, "Set1") )
+  ####################################
+  ## Define variance Explained
+  ####################################
+  varexp = mydata[[pop]]$varexp[1:10]
+  varexp = round(varexp, d = 3)
+  
+  ################################
+  ## PLOT
+  ################################
+  myplots = lapply(2:4, function(i){
+    pc = paste0("PC", i)
+    plotdata %>% ggplot( aes_string(x = "PC1", y = pc)  ) +
+    geom_point( aes(color = pop), shape = 19 ) + 
+    scale_color_manual( values = plot_colors, drop = FALSE ) +
+    theme_bw() +
+    # scale_fill_manual( values = UNregions$colors, drop = FALSE ) +
+    labs(color = "Population", 
+         x = paste0("PC1  ", varexp[1], "%"),
+         y = paste0("PC", i, "  ", varexp[i], "%")) +
+    #guides(color=guide_legend(ncol=2)) +
+    guides(color=guide_legend(ncol=1,  override.aes = list(size=4) ) )
+  })
+  
+  p = ggpubr::ggarrange(plotlist = myplots,
+                    ncol=3, nrow=1,
+                    common.legend = TRUE,
+                    legend="right")
+  myplots$combined = p
+  return(myplots)
+})
+names(ReferencePop_Plots) = pops
+
+
+####################
+## Save the ggplot
+## objects to 
+## file
+####################
+f = paste0(figures_dir, "ReferencePop_Plots.Rdata")  
+save(ReferencePop_Plots, file = f)
+
+
+```
+
+```{r, fig.width = 10, fig.height = 4}
+myplots = list(ReferencePop_Plots[["AFR"]]$combined,
+               ReferencePop_Plots[["EUR"]]$combined,
+               ReferencePop_Plots[["SAS"]]$combined,
+               ReferencePop_Plots[["EAS"]]$combined)
+
+f = paste0(figures_dir, "plot02_continental_PCs_ggplot.pdf")  
+pdf(f, width = 11, height = 12)
+ggpubr::ggarrange(plotlist = myplots,
+                    ncol=1, nrow=4,
+                    labels = c("A","B","C", "D"))
+dev.off()
+```
+
+## Run Kmeans
+
+```{r}
+# number_of_pcs = c(4, 4, 5, 4)
+# names(number_of_pcs) = pops
+# ###
+# kmeans = lapply(pops, function(pop){
+#   #########################
+#   ## 1. how many PCs to use ?
+#   #########################
+#   w = which(names(number_of_pcs) == pop)
+#   pcount = number_of_pcs[w]
+#   #########################
+#   ## 2. define data set to run
+#   #########################
+#   wdata = mydata[[pop]]$pcs
+#   keepukbb = which(wdata$pop == "UKBB")
+#   wdata = wdata[keepukbb, ]
+#   p = paste0("PC", 1:pcount)
+#   wdata = wdata[, p]
+#   #########################
+#   ## 3. run kmeans
+#   #########################
+#   Tstart =  Sys.time()
+#   K = DetermineK(mydata = wdata, 
+#              kmax = 2,
+#              num_iter = 100, 
+#              plotrepress =  TRUE)
+#   Tend = Sys.time()
+#   Tend - Tstart
+#   
+#   return(K)
+# })
+# 
+# names(kmeans) = pops
+
+f = paste0(results_dir, "kmeans/kmeans.Rdata")
+load(f)
+
+```
+
+
+## Plot Silhouette
+
+```{r, fig.width = 5, fig.height = 4}
+f = paste0(results_dir, "figures/plot03_Silhouette.pdf")
+pdf(file = f, width = 8, height = 6)
+par(mfrow = c(2,2) )
+####
+for(pop in pops){
+  sil = kmeans[[pop]]$Silhouette
+  bestk = kmeans[[pop]]$BestK
+  ###
+  plot(c(0,sil), type = "b", pch = 19, frame = FALSE,
+     main = paste0(pop),
+     ylab  = "Avg Silhouette Width",
+      xlab = "k")
+  abline(v = bestk , lty =2)
+}
+dev.off()
+```
+
+
+## plot PCs for best K
+
+```{r, fig.width = 10, fig.height = 9}
+f = paste0(results_dir, "figures/plot04_continental_kmeans_PCs.pdf")
+pdf(f, width = 8, height = 9)
+
+par(mfrow = c(4,3), oma = c(2,1,2,0), mar = c(5,5,2,1))
+for(i in 1:length(pops)){
+  ## grab the PCs
+  pop = names(mydata)[i]
+  varexp = signif( mydata[[i]]$varexp[1:20] , d = 3)
+  plotdata = mydata[[i]]$pcs
+  ## how many clusters ?
+  bestk = kmeans[[pop]]$BestK
+  ## grab the clusters
+  kcluster = kmeans[[pop]]$K[[bestk]]$cluster
+  ## Set up the pc data
+  plotdata = plotdata[, c("PC1","PC2","PC3","PC4","pop")]
+  keepukbb = which(plotdata$pop == "UKBB")
+  plotdata = plotdata[keepukbb, ]
+  ## Add the K pops
+  plotdata$k = as.factor( paste0( "K", kcluster ) )
+  ## Add Color
+  cols = RColorBrewer::brewer.pal( length(levels(plotdata$k)) , "Set1")
+  plotdata$pcol = cols[plotdata$k]
+  ## Add Shapes
+  shapes = c(15,17,18,19,1,2,3,5,4)[ 1:length(levels(plotdata$k)) ]
+  plotdata$ppch = shapes[plotdata$k]
+  
+  #### The plots
+  for(j in 2:4){
+    plot(plotdata$PC1, plotdata[,j],
+         col = plotdata$pcol,
+         pch = plotdata$ppch,
+         cex = plotdata$pcex,
+         xlab = paste0("PC1 varexp = ", varexp[1], "%" ),
+         ylab = paste0("PC",j," varexp =  ", varexp[j], "%" ),
+         main = pop)
+    abline(h = 0, lty = 2, col = "grey", lwd = 0.75)
+    abline(v = 0, lty = 2, col = "grey", lwd = 0.75)
+    if(j == 3){
+      ## identify the proper color for each pop
+      p = levels(plotdata$k)
+      cols = sapply(p, function(x){ 
+        w = which(plotdata$k == x)[1]; return(plotdata$pcol[w]) 
+        })
+      ### plot the legend
+      if(pop == "AFR"){
+        legend("topleft", legend = levels(plotdata$k), 
+             pch = 20, col = cols, pt.cex = 2.5, cex = 0.75, bg = NULL)
+      } else {
+        legend("topright", legend = levels(plotdata$k), 
+             pch = 20, col = cols, pt.cex = 2.5, cex = 0.75, bg = NULL)  
+      }
+      
+      }
+  }
+}
+
+dev.off()
+
+
+```
+## Plot EUR with a K of 6
+
+```{r, fig.width = 10, fig.height = 3}
+par(mfrow = c(1,3), oma = c(2,1,2,0), mar = c(5,5,2,1))
+  i = 2
+  ## grab the PCs
+  pop = "EUR"
+  varexp = signif( mydata[[i]]$varexp[1:20] , d = 3)
+  plotdata = mydata[[i]]$pcs
+  ## how many clusters ?
+  bestk = kmeans[[pop]]$BestK
+  bestk = 6
+  ## grab the clusters
+  kcluster = kmeans[[pop]]$K[[bestk]]$cluster
+  ## Set up the pc data
+  plotdata = plotdata[, c("PC1","PC2","PC3","PC4","pop")]
+  keepukbb = which(plotdata$pop == "UKBB")
+  plotdata = plotdata[keepukbb, ]
+  ## Add the K pops
+  plotdata$k = as.factor( paste0( "K", kcluster ) )
+  ## Add Color
+  cols = RColorBrewer::brewer.pal( length(levels(plotdata$k)) , "Set1")
+  plotdata$pcol = cols[plotdata$k]
+  ## Add Shapes
+  shapes = c(15,17,18,19,1,2,3,5,4)[ 1:length(levels(plotdata$k)) ]
+  plotdata$ppch = shapes[plotdata$k]
+  
+  #### The plots
+  for(j in 2:4){
+    plot(plotdata$PC1, plotdata[,j],
+         col = plotdata$pcol,
+         pch = plotdata$ppch,
+         cex = plotdata$pcex,
+         xlab = paste0("PC1 varexp = ", varexp[1], "%" ),
+         ylab = paste0("PC",j," varexp =  ", varexp[j], "%" ),
+         main = pop)
+    abline(h = 0, lty = 2, col = "grey", lwd = 0.75)
+    abline(v = 0, lty = 2, col = "grey", lwd = 0.75)
+    if(j == 3){
+      ## identify the proper color for each pop
+      p = levels(plotdata$k)
+      cols = sapply(p, function(x){ 
+        w = which(plotdata$k == x)[1]; return(plotdata$pcol[w]) 
+        })
+      ### plot the legend
+      if(pop == "AFR"){
+        legend("topleft", legend = levels(plotdata$k), 
+             pch = 20, col = cols, pt.cex = 2.5, cex = 0.75, bg = NULL)
+      } else {
+        legend("topright", legend = levels(plotdata$k), 
+             pch = 20, col = cols, pt.cex = 2.5, cex = 0.75, bg = NULL)  
+      }
+      
+      }
+  }
+
+
+```
+
+
+
+```{r, fig.width = 8, fig.height= 2}
+
+KmeansPCA_Plots = lapply(pops, function(pop){
+  ####################################
+  ## Define the working plot data set
+  ####################################
+  plotdata = mydata[[pop]]$pcs
+  ## how many clusters ?
+  bestk = kmeans[[pop]]$BestK
+  if(pop == "EUR"){
+    bestk = 6
+  }
+  ## grab the clusters
+  kcluster = kmeans[[pop]]$K[[bestk]]$cluster
+  ## Set up the pc data
+  plotdata = plotdata[, c("PC1","PC2","PC3","PC4","pop")]
+  keepukbb = which(plotdata$pop == "UKBB")
+  plotdata = plotdata[keepukbb, ]
+  ## Add the K pops
+  plotdata$k = as.factor( paste0( "K", kcluster ) )
+  
+  l = length( levels(plotdata$k) )
+  plot_colors = c( RColorBrewer::brewer.pal(9, "Set1") )
+  
+  ####################################
+  ## Define variance Explained
+  ####################################
+  varexp = mydata[[pop]]$varexp[1:10]
+  varexp = round(varexp, d = 3)
+  
+  ################################
+  ## PLOT
+  ################################
+  myplots = lapply(2:4, function(i){
+    pc = paste0("PC", i)
+    plotdata %>% ggplot( aes_string(x = "PC1", y = pc)  ) +
+    geom_point( aes(color = k), shape = 19 ) + 
+    scale_color_manual( values = plot_colors, drop = FALSE ) +
+    theme_bw() +
+    # scale_fill_manual( values = UNregions$colors, drop = FALSE ) +
+    labs(color = "Population", 
+         x = paste0("PC1  ", varexp[1], "%"),
+         y = paste0("PC", i, "  ", varexp[i], "%")) +
+    #guides(color=guide_legend(ncol=2)) +
+    guides(color=guide_legend(ncol=1,  override.aes = list(size=4) ) )
+  })
+  
+  p = ggpubr::ggarrange(plotlist = myplots,
+                    ncol=3, nrow=1,
+                    common.legend = TRUE,
+                    legend="right")
+  myplots$combined = p
+  return(myplots)
+})
+names(KmeansPCA_Plots) = pops
+
+
+####################
+## Save the ggplot
+## objects to 
+## file
+####################
+f = paste0(results_dir, "figures/Kmeans_PCA_Plots_EUR_K6.Rdata")  
+save(KmeansPCA_Plots, file = f)
+
+
+```
+
+```{r, fig.width = 10, fig.height = 4}
+myplots = list(KmeansPCA_Plots[["AFR"]]$combined,
+               KmeansPCA_Plots[["EUR"]]$combined,
+               KmeansPCA_Plots[["SAS"]]$combined,
+               KmeansPCA_Plots[["EAS"]]$combined)
+
+f = paste0(results_dir, "figures/plot04_continental_kmeans_PCs_ggplot_v2.pdf")  
+pdf(f, width = 11, height = 12)
+ggpubr::ggarrange(plotlist = myplots,
+                    ncol=1, nrow=4,
+                    labels = c("A","B","C", "D"))
+dev.off()
+```
+
+
+
+# Set Up smartpca Fst runs
+
+-- copy the sample id files for smartrel and smartpca over to project portal
+
+## Read in and edit the smartpca ID files
+
+```{r}
+dd = paste0(results_dir, "smartrel/")
+files = list.files(dd)
+
+ids = lapply(pops, function(pop){
+  f = paste0(dd, "ukb_1kg_",pop,".IDS")
+  d = read.table(f, header = FALSE, as.is = TRUE, sep = " ")
+})
+names(ids) = pops
+```
+
+## Add the Kpop ids
+
+```{r}
+for(pop in pops){
+  ##################
+  ## sample ID file
+  ##################
+  d = ids[[pop]] 
+  ##################
+  ## PCdata file
+  ##################
+  pcdata = mydata[[pop]]$pcs
+  ## keep just the UKBB samples
+  w = grep("UKBB", pcdata$pop)
+  pcdata = pcdata[w, ]
+  ##################
+  ## Kmeans Data
+  ##################
+  k = kmeans[[pop]]
+  bestk = as.numeric( k$BestK )
+  if(pop == "EUR"){bestk = 6}
+  kids = k$K[[bestk]]$cluster
+  kids = paste0("K", kids)
+  ## add Kids to pcdata
+  names(kids) = pcdata$ID
+  ## replace UKBB IDs with K-ids
+  m = match(d[,1], names(kids))
+  d$Kid = kids[m]
+  w = which( is.na( d$Kid ) )
+  d$Kid[w] = d[w,3]
+  d = d[, -3]
+  ##
+  popnames =  unique(d[,3]) 
+  w = grep("UKBB", popnames)
+  if(length(w)>0){popnames = popnames[-w]}
+  popnames = data.frame(names = sort(popnames) )
+  ### WRITE 2 FILE
+  f = paste0(results_dir, "kmeans/ukb_1kg_",pop,"_Kcluster.IDS")
+  write.table(d, file = f, row.names = FALSE, col.names = FALSE, sep = " ", quote = FALSE)
+  ##
+  f = paste0(results_dir, "smartpca_Fst/", pop,"_popIDs2run.txt")
+  write.table(popnames, file = f, row.names = FALSE, col.names = FALSE, sep = " ", quote = FALSE)
+  }
+ 
+```
+
+## draw a random sample of individuals from the EUR sample to derive Fst estimates
+
+```{r}
+pop = "AFR"
+##################
+## sample ID file
+##################
+d = ids[[pop]] 
+##################
+## PCdata file
+##################
+pcdata = mydata[[pop]]$pcs
+## keep just the UKBB samples
+w = grep("UKBB", pcdata$pop)
+pcdata = pcdata[w, ]
+##################
+## Kmeans Data
+##################
+k = kmeans[[pop]]
+bestk = as.numeric( k$BestK )
+if(pop == "EUR"){bestk = 6}
+kids = k$K[[bestk]]$cluster
+kids = paste0("K", kids)
+## add Kids to pcdata
+names(kids) = pcdata$ID
+## replace UKBB IDs with K-ids
+m = match(d[,1], names(kids))
+d$Kid = kids[m]
+w = which( is.na( d$Kid ) )
+d$Kid[w] = d[w,3]
+d = d[, -3]
+## Randomly Sample the K individuals
+k = sort( unique(kids) )
+for(i in k){
+  w = which(d$Kid == i)
+  s = sample(w, 250)
+  n = w[!w %in% s]
+  d$Kid[n] = paste0(d$Kid[n], "_others")
+}
+##
+f = paste0(results_dir, "kmeans/ukb_1kg_",pop,"_Kcluster_randomsample.IDS")
+write.table(d, file = f, row.names = FALSE, col.names = FALSE, sep = " ", quote = FALSE)
+  
+```
+
+
+
+## Fst from smartPCA
+
+```{r}
+fst_mats = lapply(pops, function(pop){
+  f = paste0(results_dir, "smartpca_Fst/", pop, "_phylip_Fst.txt")
+  fmat = read.table(f, header = FALSE, skip = 1)
+  rownames(fmat) = fmat[,1]
+  fmat = fmat[,-1]
+  colnames(fmat) = rownames(fmat)
+  return(fmat)
+  })
+names(fst_mats) = pops
+```
+
+
+```{r, fig.width = 10, fig.height = 6}
+library(ape)
+dmat = as.dist( as.matrix(  fst_mats[[pop]]  ) )
+tree_ape = nj(dmat)
+tree = hclust(dmat, method = "ward.D2")
+tree2 = hclust(dmat, method = "average")
+###
+par(mfrow = c(2,1), mar = c(1,5,3,0))
+plot(tree, hang = -1, xlab = "")
+# plot(tree_ape)
+plot(tree2, hang = -1, xlab = "")
+```
+
+
+
+```{r, fig.width = 6, fig.height = 2}
+trees = lapply(pops, function(pop){
+  dmat = fst_mats[[pop]] 
+  w = which(colnames(dmat) %in% paste0("K", 1:10)  )
+  dmat = dmat[w,w]
+  dmat = as.dist( as.matrix(  dmat ) )
+  # UPGMA cluster
+  tree1 = hclust(dmat, method = "average")
+  tree2 = hclust(dmat, method = "complete")
+  ###
+  return(tree2)
+})
+names(trees) = pops
+```
+
+
+```{r, fig.width = 10, fig.height = 6}
+par(mfrow = c(2,2))
+for(pop in pops){
+  plot( trees[[pop]], hang = -1,
+        main = pop, lwd = 2, cex = 2, cex.axis = 2, sub = "", xlab = "", ylab = "Fst distances")
+}
+```
+
+
+```{r}
+FstDist = sapply(pops, function(pop){
+  dmat = fst_mats[[pop]] 
+  w = which(colnames(dmat) %in% paste0("K", 1:10)  )
+  dmat = dmat[w,w]
+  dmat = as.dist( as.matrix(  dmat ) )
+  ###
+  Fst_mean = mean(dmat)
+  Fst_max = max(dmat)
+  Fst_min = min(dmat)
+  ###
+  out = c(Fst_mean, Fst_max, Fst_min)
+  names(out) = c("mean","max","min")
+  return(out)
+})
+
+FstDist
+```
+
+```{r}
+KG_FstDist = sapply(pops, function(pop){
+  dmat = fst_mats[[pop]] 
+  w = which(colnames(dmat) %in% paste0("K", 1:10)  )
+  dmat = dmat[-w,-w]
+  dmat = as.dist( as.matrix(  dmat ) )
+  ###
+  Fst_mean = mean(dmat)
+  Fst_max = max(dmat)
+  Fst_min = min(dmat)
+  ###
+  out = c(Fst_mean, Fst_max, Fst_min)
+  names(out) = c("mean","max","min")
+  return(out)
+})
+
+KG_FstDist
+```
+
+
+```{r}
+par(mfrow = c(1,2))
+heatmap(KG_FstDist)
+heatmap(FstDist)
+```
+
+```{r, fig.width = 10, fig.height = 4}
+b <- seq(0, 0.02, by = 0.005)
+####################################
+## UKBB
+####################################
+x = reshape2::melt(FstDist)
+colnames(x) = c("estimate","population","value")
+x$estimate = factor(x$estimate, levels = c("max","mean","min") )
+x$value = round(x$value, d = 4)
+###
+P1 = ggplot(x, aes(x = population, y = estimate)) +
+  geom_tile(aes(fill = value), color = "white") + 
+  geom_text(aes(label=value), color = "black") +
+  labs(y = "Fst estimate", x = "continental ancestry group", title = "UKBB k-cluster groups") +
+  #scale_fill_viridis_c(option = "B", direction = +1)
+  scale_fill_distiller(palette = "YlGnBu", direction = 1, breaks = b, labels = format(b))
+
+####################################
+## 1000 Genomes
+####################################
+x = reshape2::melt(KG_FstDist)
+colnames(x) = c("estimate","population","value")
+x$estimate = factor(x$estimate, levels = c("max","mean","min") )
+x$value = round(x$value, d = 4)
+###
+P2 = ggplot(x, aes(x = population, y = estimate)) +
+  geom_tile(aes(fill = value), color = "white") + 
+  geom_text(aes(label=value), color = "black") +
+  labs(y = "Fst estimate", x = "continental ancestry group", title = "1000 Genome Populations") +
+  #scale_fill_viridis_c(option = "B", direction = +1)
+  scale_fill_distiller(palette = "YlGnBu", direction = 1, breaks = b, labels = format(b))
+
+f = paste0(results_dir, "figures/Fst_CAG_estiamtes.pdf")
+pdf(f, width = 10, height = 3)
+ggpubr::ggarrange(P2, P1, nrow = 1, labels = c("A","B"))
+dev.off()
+
+```
+

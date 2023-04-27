@@ -1,0 +1,519 @@
+```{r, include = FALSE}
+## load desired libraries
+library(tidyverse)
+library(RColorBrewer)
+
+```
+
+
+```{r}
+## Load Parameter file 
+pfile = "parameters/pfile.txt"
+par_data = read.table(pfile, sep = "=")
+
+## READ IN THE ANCESTRY ESTMIATED DATA
+w = which(par_data[,1] == "ANCEST")
+mydata = read.table(par_data[w,2], 
+                    head = FALSE, sep = "\t", as.is = TRUE)
+# remove unwanted columns
+mydata = mydata[, -c(3:6) ]
+
+## split ancestry estimates
+out = t( sapply(mydata[,3], function(x){
+  strsplit(x, split = " ")[[1]]
+  }) )
+out = as.data.frame(out)
+for(i in 1:ncol(out)){ out[,i]  = as.numeric( as.character( unlist(out[,i]) ) ) }
+mydata = cbind(mydata[,1:2 ], out)
+rownames(mydata) = mydata[,1]
+
+## add column names
+colnames(mydata) = c("ind","pop","GBRanc","CHSanc","ITUanc","YRIanc")
+
+```
+
+
+```{r}
+## define 1000 Genomes data set
+w = which(mydata$pop %in% c("YRI","GBR","ITU","CHS") )
+KGdata =  mydata[w,]
+
+## define UKBB data set
+UKBBdata = mydata[-w, ]
+
+##### order pops in KGdata
+a = which(KGdata$pop == "YRI")
+b = which(KGdata$pop == "GBR")
+d = which(KGdata$pop == "ITU")
+e = which(KGdata$pop == "CHS")
+
+KGdata = KGdata[c(a,b,d,e) , ]
+
+```
+
+## Identify and print those individuals with >80% ancestry
+
+```{r}
+w = which(par_data[,1] == "RESULTSDIR")
+results_dir = par_data[w,2]
+###
+
+w = which(UKBBdata$GBRanc >= 0.8)
+out = data.frame(id = UKBBdata[w, 1] , fid = UKBBdata[w, 1])
+dim(out)
+f = paste0(results_dir, "#/UKB_IDs_80Perc_EUR_Anc.txt" )
+write.table(out, file = f, row.names = FALSE, col.names = FALSE, sep = " ", quote = FALSE)
+  
+####
+w = which(UKBBdata$CHSanc >= 0.8)
+out = data.frame(id = UKBBdata[w, 1] , fid = UKBBdata[w, 1])
+dim(out)
+f = paste0(results_dir, "#/UKB_IDs_80Perc_EAS_Anc.txt" )
+write.table(out, file = f, row.names = FALSE, col.names = FALSE, sep = " ", quote = FALSE)
+
+####
+w = which(UKBBdata$ITUanc >= 0.8)
+out = data.frame(id = UKBBdata[w, 1] , fid = UKBBdata[w, 1])
+dim(out)
+f = paste0(results_dir, "#/UKB_IDs_80Perc_SAS_Anc.txt" )
+write.table(out, file = f, row.names = FALSE, col.names = FALSE, sep = " ", quote = FALSE)
+
+####
+w = which(UKBBdata$YRIanc >= 0.8)
+out = data.frame(id = UKBBdata[w, 1] , fid = UKBBdata[w, 1])
+dim(out)
+f = paste0(results_dir, "#/UKB_IDs_80Perc_AFR_Anc.txt" )
+write.table(out, file = f, row.names = FALSE, col.names = FALSE, sep = " ", quote = FALSE)
+
+
+```
+
+## How many individuals do not make it into a CAG
+
+```{r}
+eur = length( which(UKBBdata$GBRanc >= 0.8) )
+eas = length( which(UKBBdata$CHSanc >= 0.8) )
+sas = length( which(UKBBdata$ITUanc >= 0.8) )
+afr = length( which(UKBBdata$YRIanc >= 0.8) )
+counts = c(eur, eas, sas, afr)
+counts
+sum(counts)
+nrow(UKBBdata) - sum(counts)
+```
+
+
+```{r}
+############################
+#### order UKBB data
+############################
+# o = with(UKBBdata, order( YRIanc, GBRanc, decreasing = TRUE) )
+
+## Define Plot Data
+# pdata = rbind(KGdata, UKBBdata[o,])
+
+```
+
+
+```{r}
+############################
+## Alternative 
+##  order UKBB data
+############################
+## identify those with majorities
+a = which(UKBBdata$YRIanc >= 0.5)
+b = which(UKBBdata$GBRanc >= 0.5)
+d = which(UKBBdata$ITUanc >= 0.5)
+e = which(UKBBdata$CHSanc >= 0.5)
+
+## identify those with no majorities
+o = which(!1:nrow(UKBBdata) %in% c(a,b,d,e))
+# UKBBdata[o,]
+
+## order the majorities
+a = a[ order( UKBBdata$YRIanc[a], decreasing = TRUE ) ]
+b = b[ order( UKBBdata$GBRanc[b], decreasing = TRUE ) ]
+d = d[ order( UKBBdata$ITUanc[d], decreasing = TRUE ) ]
+e = e[ order( UKBBdata$CHSanc[e], decreasing = TRUE ) ]
+
+UKBBdata = UKBBdata[ c(a,b,d,e,o) , ]
+
+###################
+#### Plot data
+###################
+pdata = rbind(KGdata, UKBBdata)
+
+###################
+## AFR Plot data
+###################
+a = which(UKBBdata$YRIanc >= 0.1)
+a = a[ order( UKBBdata$YRIanc[a], decreasing = TRUE ) ]
+afrdata =  rbind(KGdata, UKBBdata[ a, ])
+
+AFRanc_count10 = length( which(UKBBdata$YRIanc >= 0.1) )
+AFRanc_count45 = length( which(UKBBdata$YRIanc >= 0.45) )
+
+```
+
+
+
+```{r, fig.width = 20, fig.height = 12}
+w = which(par_data[,1] == "RESULTSDIR")
+results_dir = par_data[w,2]
+## plot colors
+pcol = brewer.pal(4, "Set1")[c(2,4,3,1)]
+##
+# pdf( paste0(results_dir, "#/UKBB_ContinentalAncestry_Estimates.pdf" ), width = 15, height = 8)
+# postscript( paste0(results_dir, "#/UKBB_ContinentalAncestry_Estimates.eps" ), width = 15, height = 8)
+#png( paste0(results_dir, "#/UKBB_ContinentalAncestry_Estimates.png" ), width = 15, height = 8, units = "in", res = 150)
+
+
+par(mfrow = c(2,1))
+## PLOT ALL
+barplot( t(as.matrix( pdata[, 3:6] )), col = pcol ,
+         xlab="Individuals", ylab="Ancestry", 
+         border=NA, space = 0, xaxt = "n",
+         main = paste0( "Ancestry estimates for UKBB non-european individuals; n = ", nrow(UKBBdata) ) )
+abline(h = 0.5, col = "grey", lty = 2, lwd = 2)
+abline(h = 0.75, col = "grey", lty = 3, lwd = 2)
+abline(h = 0.25, col = "grey", lty = 3, lwd = 2)
+
+## PLOT Those with extensive YRI ANC
+barplot( t(as.matrix( afrdata[, 3:6] )), col = pcol ,
+         xlab="Individuals", ylab="Ancestry", 
+         border=NA, space = 0, xaxt = "n",
+         main = paste0( "Ancestry estimates for UKBB non-european individuals with >= 0.1 AFR ancestry; n = ", AFRanc_count10 ),
+         sub = paste0( "number of UKBB individuals with >= 0.45 YRI ancestry = ", AFRanc_count45 ) )
+abline(h = 0.5, col = "grey", lty = 2, lwd = 2)
+abline(h = 0.75, col = "grey", lty = 3, lwd = 2)
+abline(h = 0.25, col = "grey", lty = 3, lwd = 2)
+mtext("Supervised populations: YRI, GBR, ITU, CHS", side = 1, line = 0, adj = 0)
+#dev.off()
+
+```
+
+
+
+```{r, fig.width = 10, fig.height = 3}
+w = which(pdata$pop == "UKBB")
+
+# pdf( paste0(results_dir, "#/UKBB_Cont_Ancestries.pdf" ), width = 10, height = 3)
+###
+mat = matrix(c(1,2,2,2,2,2,2,2), nrow = 1)
+layout(mat)
+par(mar = c(5,5,2,0))
+###
+barplot( t(as.matrix( pdata[-w, 3:6] )), col = pcol ,
+         xlab="References", ylab="Ancestry", 
+         border=NA, space = 0, xaxt = "n")
+abline(h = 0.5, col = "grey", lty = 2, lwd = 2)
+abline(h = 0.75, col = "grey", lty = 3, lwd = 2)
+abline(h = 0.25, col = "grey", lty = 3, lwd = 2)
+text(55, 0.6, "AFR", col = "white", srt = 90, cex = 1.25)
+text(150, 0.6, "EUR", col = "white", srt = 90, cex = 1.25)
+text(250, 0.6, "SAS", col = "white", srt = 90, cex = 1.25)
+text(360, 0.6, "EAS", col = "white", srt = 90, cex = 1.25)
+###
+barplot( t(as.matrix( pdata[w, 3:6] )), col = pcol ,
+         xlab="Individuals", ylab="Ancestry", 
+         border=NA, space = 0, xaxt = "n")
+         #main = paste0( "Ancestry estimates for UKBB non-european individuals; n = ", nrow( pdata[w, 3:6]) ) )
+abline(h = 0.5, col = "grey", lty = 2, lwd = 2)
+abline(h = 0.75, col = "grey", lty = 3, lwd = 2)
+abline(h = 0.25, col = "grey", lty = 3, lwd = 2)
+
+#dev.off()
+
+##78,296 individuals
+```
+
+
+# Place Ancestry Estimates onto PCA
+
+## Read in the PCA Data
+
+```{r}
+## READ IN PCA Data
+w = which(par_data[,1] == "PCADATA")
+pcadata = read.table(par_data[w,2], head = FALSE, sep = " ", as.is = TRUE)
+# colnames(pcadata) = c("ID", paste0("PC", 1:10))
+colnames(pcadata) = c("ID",  paste0("PC", 1:10))
+```
+
+
+```{r}
+## limit the PCA data to only those non-white brits in the ancestry analysis
+w = which(pcadata$ID %in% UKBBdata$ind)
+pcadata = pcadata[w,]
+```
+
+## AFR PCA
+
+```{r, fig.width = 4, fig.height = 4}
+##########################
+## ADD PLOTTING VARIABLES
+##########################
+## PLOT SHAPE
+pcadata$shape = 1
+w = which( UKBBdata$YRIanc >= 0.1) 
+Ind_With_YRI_ANC = UKBBdata$ind[w]
+m = match(Ind_With_YRI_ANC, pcadata$ID)
+pcadata$shape[ m ] = 6
+
+## PLOT COLOR
+pcadata$color = "grey90"
+## plotting colors
+# pcol = c( brewer.pal(9, "Greys")[7:4], brewer.pal(9, "Reds")[5:9] )
+pcol = c( brewer.pal(9, "Reds")[1:9] )
+##
+s = seq(0.1, 0.9, by = 0.1)
+##
+for(i in 1:length(s)){
+  #print(i)
+  ####
+  ancest = s[i]
+  w = which( UKBBdata$YRIanc >= ancest & UKBBdata$YRIanc < ancest + 0.1 ) 
+  Ind_With_YRI_ANC = UKBBdata$ind[w]
+  m = match(Ind_With_YRI_ANC, pcadata$ID)
+  pcadata$color[ m ] = pcol[i]
+  }
+
+###################################
+ContPlotData = data.frame( AFR_PC1 = pcadata$PC1, AFR_PC2 = pcadata$PC2,
+                           AFR_col = pcadata$color, 
+                           AFR_pch = pcadata$shape)
+
+### PLOT
+plot(pcadata$PC1, pcadata$PC2, 
+     col = pcadata$color, 
+     pch = pcadata$shape,
+      xlab = "PC1", ylab = "PC2")
+legend("bottomright", legend = paste0(">=",s), 
+       pch = 19, pt.cex = 1.5, col = pcol, 
+       title = "% AFR ancestry")
+
+```
+
+## East Asian Ancestry
+
+```{r, fig.width = 4, fig.height = 4}
+##########################
+## ADD PLOTTING VARIABLES
+##########################
+## PLOT SHAPE
+pcadata$shape = 1
+w = which( UKBBdata$CHSanc >= 0.1) 
+Ind_With_CHS_ANC = UKBBdata$ind[w]
+m = match(Ind_With_CHS_ANC, pcadata$ID)
+pcadata$shape[ m ] = 6
+
+## PLOT COLOR
+pcadata$color = "grey90"
+## plotting colors
+# pcol = c( brewer.pal(9, "Blues")[7:4], brewer.pal(9, "YlOrRd")[5:9] )
+pcol = c( brewer.pal(9, "Purples")[1:9] )
+##
+s = seq(0.1, 0.9, by = 0.1)
+##
+for(i in 1:length(s)){
+  #print(i)
+  ####
+  ancest = s[i]
+  w = which( UKBBdata$CHSanc >= ancest & UKBBdata$CHSanc < ancest + 0.1 ) 
+  Ind_With_CHS_ANC = UKBBdata$ind[w]
+  m = match(Ind_With_CHS_ANC, pcadata$ID)
+  pcadata$color[ m ] = pcol[i]
+}
+##################
+## Continental Plot Data
+##################
+Ndata = data.frame( EAS_PC1 = pcadata$PC1, EAS_PC2 = pcadata$PC2,
+                           EAS_col = pcadata$color, 
+                           EAS_pch = pcadata$shape)
+ContPlotData = cbind(ContPlotData, Ndata)
+
+##################
+## PLOT
+##################
+plot(pcadata$PC1, pcadata$PC2, 
+     col = pcadata$color, 
+     pch = pcadata$shape,
+      xlab = "PC1", ylab = "PC2")
+legend("bottomright", legend = paste0(">=",s), 
+       pch = 19, pt.cex = 1.5, col = pcol, 
+       title = "% EAS ancestry")
+```
+
+## South Asian Ancestry
+
+```{r, fig.width = 4, fig.height = 4}
+##########################
+## ADD PLOTTING VARIABLES
+##########################
+## PLOT SHAPE
+pcadata$shape = 1
+w = which( UKBBdata$ITUanc >= 0.1) 
+Ind_With_SAN_ANC = UKBBdata$ind[w]
+m = match(Ind_With_SAN_ANC, pcadata$ID)
+pcadata$shape[ m ] = 6
+
+## PLOT COLOR
+pcadata$color = "grey90"
+## plotting colors
+# pcol = c( brewer.pal(9, "Blues")[7:4], brewer.pal(9, "YlOrRd")[5:9] )
+pcol = c( brewer.pal(9, "Greens")[1:9] )
+##
+s = seq(0.1, 0.9, by = 0.1)
+##
+for(i in 1:length(s)){
+  #print(i)
+  ####
+  ancest = s[i]
+  w = which( UKBBdata$ITUanc >= ancest & UKBBdata$ITUanc < ancest + 0.1 ) 
+  Ind_With_SAN_ANC = UKBBdata$ind[w]
+  m = match(Ind_With_SAN_ANC, pcadata$ID)
+  pcadata$color[ m ] = pcol[i]
+}
+##################
+## Continental Plot Data
+##################
+Ndata = data.frame( SAS_PC1 = pcadata$PC1, SAS_PC2 = pcadata$PC2,
+                           SAS_col = pcadata$color, 
+                           SAS_pch = pcadata$shape)
+ContPlotData = cbind(ContPlotData, Ndata)
+
+##################
+## PLOT
+##################
+plot(pcadata$PC1, pcadata$PC2, 
+     col = pcadata$color, 
+     pch = pcadata$shape,
+      xlab = "PC1", ylab = "PC2")
+legend("bottomright", legend = paste0(">=",s), 
+       pch = 19, pt.cex = 1.5, col = pcol, 
+       title = "% SAS ancestry")
+
+```
+
+
+## European Ancestry
+
+```{r, fig.width = 3, fig.height = 3}
+##########################
+## ADD PLOTTING VARIABLES
+##########################
+## PLOT SHAPE
+pcadata$shape = 1
+w = which( UKBBdata$GBRanc >= 0.1) 
+Ind_With_EUR_ANC = UKBBdata$ind[w]
+m = match(Ind_With_EUR_ANC, pcadata$ID)
+pcadata$shape[ m ] = 6
+
+## PLOT COLOR
+pcadata$color = "grey90"
+## plotting colors
+# pcol = c( brewer.pal(9, "YlOrRd")[7:4], brewer.pal(9, "Blues")[5:9] )
+pcol = c(  brewer.pal(9, "Blues")[1:9] )
+##
+s = seq(0.1, 0.9, by = 0.1)
+##
+for(i in 1:length(s)){
+  #print(i)
+  ####
+  ancest = s[i]
+  w = which( UKBBdata$GBRanc >= ancest & UKBBdata$GBRanc < ancest + 0.1 ) 
+  Ind_With_EUR_ANC = UKBBdata$ind[w]
+  m = match(Ind_With_EUR_ANC, pcadata$ID)
+  pcadata$color[ m ] = pcol[i]
+}
+##################
+## Continental Plot Data
+##################
+Ndata = data.frame( EUR_PC1 = pcadata$PC1, EUR_PC2 = pcadata$PC2,
+                           EUR_col = pcadata$color, 
+                           EUR_pch = pcadata$shape)
+ContPlotData = cbind(ContPlotData, Ndata)
+
+##################
+## PLOT
+##################
+plot(pcadata$PC1, pcadata$PC2, 
+     col = pcadata$color, 
+     pch = pcadata$shape,
+      xlab = "PC1", ylab = "PC2")
+legend("bottomright", legend = paste0(">=",s), 
+       pch = 19, pt.cex = 1.5, col = pcol, 
+       title = "% EUR ancestry")
+
+
+```
+
+```{r, fig.width = 8, fig.height = 8}
+# pdf( paste0(results_dir, "#/UKBB_PCA_wAncestry_v2.pdf" ), width = 10, height = 10)
+
+par(mfrow = c(2,2), mar = c(5,5,0,0), oma = c(1,1,1,1))
+####
+# pcol = c( brewer.pal(9, "Blues")[7:4], brewer.pal(9, "Greens")[5:9] )
+pcol = c(  brewer.pal(9, "Reds") )
+### AFR
+plot(ContPlotData$AFR_PC1, ContPlotData$AFR_PC2, 
+     col = ContPlotData$AFR_col, 
+     pch = ContPlotData$AFR_pch,
+      xlab = "PC1", ylab = "PC2")
+legend("bottomright", legend = paste0(">=",s), 
+       pch = 19, pt.cex = 1.5, col = pcol, 
+       title = "% AFR ancestry")
+############
+# pcol = c( brewer.pal(9, "Blues")[7:4], brewer.pal(9, "YlOrRd")[5:9] )
+pcol = c(  brewer.pal(9, "Blues") )
+### EUR
+plot(ContPlotData$EUR_PC1, ContPlotData$EUR_PC2, 
+     col = ContPlotData$EUR_col, 
+     pch = ContPlotData$EUR_pch,
+      xlab = "PC1", ylab = "PC2")
+legend("bottomright", legend = paste0(">=",s), 
+       pch = 19, pt.cex = 1.5, col = pcol, 
+       title = "% EUR ancestry")
+### SAS
+pcol = c(  brewer.pal(9, "Greens") )
+plot(ContPlotData$SAS_PC1, ContPlotData$SAS_PC2, 
+     col = ContPlotData$SAS_col, 
+     pch = ContPlotData$SAS_pch,
+      xlab = "PC1", ylab = "PC2")
+legend("bottomright", legend = paste0(">=",s), 
+       pch = 19, pt.cex = 1.5, col = pcol, 
+       title = "% SAS ancestry")
+### EAS
+pcol = c(  brewer.pal(9, "Purples") )
+plot(ContPlotData$EAS_PC1, ContPlotData$EAS_PC2, 
+     col = ContPlotData$EAS_col, 
+     pch = ContPlotData$EAS_pch,
+      xlab = "PC1", ylab = "PC2")
+legend("bottomright", legend = paste0(">=",s), 
+       pch = 19, pt.cex = 1.5, col = pcol, 
+       title = "% EAS ancestry")
+
+# dev.off()
+
+```
+
+
+## write the ID of all samples with >= 50% AFR ancestry
+
+```{r}
+s = seq(0.40,0.95, by = .05)
+for(percent in s){
+  w = which( as.numeric(UKBBdata$YRIanc) >= as.numeric(percent) ) 
+  Ind_With_YRI_ANC = data.frame( id1 = UKBBdata$ind[w], id2 =  "UKBB")
+  ###
+  cat( paste0("The number of individuals with >= ", percent*100, "% ancestry is ", nrow(Ind_With_YRI_ANC), "\n" ) )
+  ###
+  f = paste0(results_dir, "#/UKB_Ind_IDs_with_",percent*100,"Perc_YRI_Anc.txt" )
+  write.table(Ind_With_YRI_ANC, file = f, row.names = FALSE, col.names = FALSE, sep = " ", quote = FALSE)
+  
+  
+  }
+
+
+
+```
+
